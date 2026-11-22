@@ -1,139 +1,559 @@
 # RoomStay
 
+RoomStay is a Flutter mobile application developed for the **CSC452 Flutter Mobile Programming** final project.
+
+The application helps renters discover rental properties, save favorites, contact Property Managers, and request property viewings. Property Managers can manage their own listings and respond to viewing requests.
+
+---
+
 ## Overview
 
-RoomStay is a CSC452 Flutter university project for finding rental rooms and arranging property viewings. It supports renters and Property Managers using Supabase-backed data.
+Finding a suitable rental property can require renters to check information from multiple sources and contact property owners separately.
 
-## Problem
+RoomStay provides a simple mobile platform where renters can:
 
-Renters need a clear way to compare available rooms, save properties, contact their manager and request a viewing. Property Managers need to maintain listings and respond to those requests without a separate complex management system.
+- Browse available rental properties
+- Search and filter listings
+- Save favorite properties
+- View property details
+- Contact Property Managers
+- Request property viewings
+- Manage their viewing requests
+
+Property Managers can:
+
+- Add new properties
+- Edit existing properties
+- Delete their own properties
+- Set property availability
+- Upload property images
+- Review viewing requests
+- Approve or reject pending requests
+
+---
 
 ## User Roles
 
-- **Renter:** browse, save and request viewings.
-- **Property Manager:** manage owned listings and decide viewing requests. The current database constraint allows only `renter` and `partner`; managers use `partner`. The client retains compatibility with `property_manager`, but do not create that role or migrate the database to it. The legacy `properties.partner_id` ownership column is retained.
-
-## Main Features
+RoomStay supports two application roles.
 
 ### Renter
 
-- Register/Login with password rules and confirmation.
-- Browse properties and images; search/filter/sort.
-- Favorites with real loading, empty and error states.
-- Property Detail with availability, description and facilities.
-- Search rejects contradictory rent ranges; Home categories visibly preselect their filters.
-- Contact Property Manager and Copy Email.
-- Request Viewing with a future date/time.
-- Edit/Cancel **Pending** viewing requests; read Approved/Rejected status.
-- Profile/Logout.
+Renters can:
+
+- Register and log in
+- Browse rental properties
+- Search, filter, and sort listings
+- Save properties to Favorites
+- View detailed property information
+- Contact the Property Manager
+- Request property viewings
+- Edit or cancel pending viewing requests
+- View Pending, Approved, and Rejected viewing statuses
+- View their profile
+- Log out
 
 ### Property Manager
 
-- Login with a provisioned manager profile.
-- Manage owned properties; Add/Edit/Delete where backend policies/FKs allow.
-- Availability management, facilities chips and bedrooms dropdown (Studio–5).
-- Optional gallery photo preview/upload/replacement/removal.
-- View requests for owned properties; Approve/Reject Pending requests.
-- Profile/Logout.
+Property Managers can:
+
+- Log in using a provisioned manager account
+- View their own properties
+- Add properties
+- Edit properties
+- Delete properties
+- Mark properties as Available or Unavailable
+- Select property facilities
+- Upload or replace a property image
+- View requests for their properties
+- Approve or reject pending viewing requests
+- View their profile
+- Log out
+
+> In the database, Property Managers are stored using the `partner` role. The application displays this role as **Property Manager**.
+
+---
+
+## Main Features
+
+### Authentication
+
+- User registration
+- User login
+- Password validation
+- Role-based navigation
+- Supabase Authentication
+- Logout
+
+### Property Browsing
+
+- Property list
+- Property images
+- Property details
+- Monthly rental price
+- Property type
+- Bedrooms
+- Location
+- Facilities
+- Availability
+- Property description
+
+### Search and Filters
+
+Users can search and filter properties using:
+
+- Property name or location
+- Property type
+- Minimum rent
+- Maximum rent
+- Pet Friendly
+- Near University
+- Near Transit
+- Availability
+
+Home shortcuts can also open Search with a selected filter.
+
+### Favorites
+
+Renters can:
+
+- Add properties to Favorites
+- Remove properties from Favorites
+- View all saved properties
+
+### Contact Property Manager
+
+The Property Detail screen allows renters to:
+
+- View the Property Manager's email
+- Copy the email address
+- Continue to Request Viewing
+
+### Viewing Requests
+
+Renters can:
+
+- Select a future viewing date
+- Select a viewing time
+- Add an optional message
+- Submit a viewing request
+- Edit a Pending request
+- Cancel a Pending request
+- View the request status
+
+Viewing statuses are:
+
+- `Pending`
+- `Approved`
+- `Rejected`
+
+Only Pending requests can be edited or cancelled by renters.
+
+### Property Management
+
+Property Managers can:
+
+- Add a property
+- Edit a property
+- Delete their own property
+- Change property availability
+- Select multiple facilities
+- Upload a property image
+- Replace or remove the property image
+
+### Viewing Request Management
+
+Property Managers can:
+
+- View requests for properties they own
+- Approve Pending requests
+- Reject Pending requests
+
+Managers cannot manage viewing requests belonging to another Property Manager's property.
+
+---
 
 ## Technology Stack
 
-Flutter, Dart, Supabase Auth, Supabase PostgreSQL, Supabase REST API, Supabase Storage, Row Level Security (RLS), `image_picker`, `http` and `flutter_svg`.
+| Technology | Purpose |
+|---|---|
+| Flutter | Mobile application framework |
+| Dart | Programming language |
+| Supabase Auth | User authentication |
+| Supabase PostgreSQL | Application database |
+| Supabase REST API | Database communication |
+| Supabase Storage | Property image storage |
+| Row Level Security (RLS) | Database authorization |
+| `http` | REST API requests |
+| `image_picker` | Property image selection |
+| `flutter_svg` | SVG asset display |
+
+---
 
 ## Architecture
 
+RoomStay uses a simple architecture suitable for a Flutter university project.
+
 ```text
-Flutter screens / controllers / setState
-    → HTTP REST
-    → Supabase Auth / Database / Storage
+Flutter Mobile Application
+        ↓
+HTTP REST Requests
+        ↓
+Supabase
+ ├── Authentication
+ ├── PostgreSQL Database
+ └── Storage
 ```
 
-The app uses direct REST calls and a small in-memory UserSession. It does not use supabase_flutter or a state-management framework. Automated tests explicitly inject mocked HTTP and gallery behavior; production does not fall back to demo data.
+The application uses:
+
+- `StatefulWidget`
+- `setState()`
+- `Form`
+- `GlobalKey<FormState>`
+- `TextEditingController`
+- `Navigator`
+- `MaterialPageRoute`
+- `ListView`
+- `async / await`
+- HTTP GET / POST / PATCH / DELETE
+- JSON encoding and decoding
+- SnackBar
+- CircularProgressIndicator
+
+The project intentionally does not use Provider, Riverpod, BLoC, GetX, or another state-management framework.
+
+---
 
 ## Database Tables
 
-| Table | Purpose |
-|---|---|
-| `profiles` | Auth user identity, name/email and trusted role |
-| `properties` | Listing data; `partner_id` is the manager owner |
-| `favorites` | User/property saved pairs |
-| `viewings` | Renter/property date/time/message/status |
+### `profiles`
 
-The repository is not a complete schema migration history. Verify actual constraints, grants, RLS and the Auth profile-creation trigger using [backend inspection notes](docs/property_manager_supabase.md). Do not blindly apply SQL to an existing project.
+Stores user profile information.
+
+Main fields:
+
+- `id`
+- `full_name`
+- `email`
+- `role`
+- `created_at`
+
+### `properties`
+
+Stores rental property information.
+
+Main fields:
+
+- `id`
+- `partner_id`
+- `name`
+- `location`
+- `type`
+- `monthly_rent`
+- `bedrooms`
+- `available`
+- `pet_friendly`
+- `near_university`
+- `near_transit`
+- `facilities`
+- `description`
+- `image_url`
+- `rating`
+- `created_at`
+- `updated_at`
+
+### `favorites`
+
+Stores properties saved by renters.
+
+Main fields:
+
+- `id`
+- `user_id`
+- `property_id`
+- `created_at`
+
+### `viewings`
+
+Stores property viewing requests.
+
+Main fields:
+
+- `id`
+- `property_id`
+- `renter_id`
+- `viewing_date`
+- `viewing_time`
+- `message`
+- `status`
+- `created_at`
+- `updated_at`
+
+---
 
 ## Property Images
 
-A manager selects one gallery image, previews it, then uploads to the Supabase Storage bucket `property-images` at `<manager-user-id>/<unique filename>`. The public URL is saved in `properties.image_url`. Replacing/removing an image updates the property reference; old Storage objects may remain. Broken/missing images display a placeholder.
+Property Managers can select one image from the device gallery.
 
-[Storage setup notes](docs/property_images_storage_setup.sql) describe the intentional public-read bucket and narrow manager/own-folder INSERT policy. No privileged key belongs in the app.
+The selected image is uploaded to the Supabase Storage bucket:
+
+```text
+property-images
+```
+
+Storage object paths follow this format:
+
+```text
+<manager-user-id>/<unique-filename>
+```
+
+The public image URL is then stored in:
+
+```text
+properties.image_url
+```
+
+If an image is missing or cannot be loaded, the application displays a placeholder instead.
+
+---
 
 ## Security
 
-- Public project configuration uses the Supabase URL and **publishable key** only.
-- Protected requests carry the logged-in user's JWT.
-- Property mutations constrain both property ID and session-derived owner ID.
-- Viewing decisions recheck property ownership and use a Pending predicate.
-- Manager mutation guards reject renter roles; asynchronous operations recheck relevant session access.
-- **RLS, grants and constraints are the actual authorization boundary.** Client guards and mocked tests are not proof of deployed isolation.
-- Flutter reads profiles; signup profile creation is expected from a trusted database trigger. Client profile INSERT/UPDATE is not required.
+RoomStay uses both client-side validation and Supabase Row Level Security.
 
-No service-role key, database password, private key or real account password should be committed. Run [manual live security checks](docs/SECURITY_LIVE_TEST_CHECKLIST.md) before claiming authorization is verified.
+Important security rules include:
 
-## Setup
+- The Flutter application uses only the Supabase public publishable key.
+- No service-role key or database password is stored in the application.
+- Protected API requests include the logged-in user's JWT.
+- Property Managers can modify only properties they own.
+- A second Property Manager cannot update or delete another manager's property.
+- Renters can manage only their own viewing requests.
+- Renters can edit or delete only Pending viewing requests.
+- Renters cannot change a Pending request directly to Approved or Rejected.
+- Property Managers can approve or reject only requests for properties they own.
+- Property Managers can upload images only to their own Storage folder.
 
-1. Install Flutter with a Dart SDK compatible with `pubspec.yaml` (`^3.12.1`) and Android tooling. Run `flutter doctor` and resolve the toolchain issues relevant to Android. iOS needs Xcode on macOS and has not been validated by the final Android checks.
-2. Obtain this complete source tree, including untracked files listed in [the source checklist](docs/FINAL_SOURCE_CHECKLIST.md) if sharing the current working copy.
-3. Set `supabaseUrl` and `supabasePublishableKey` in `lib/config/supabase_config.dart` for the intended project. Use only public client configuration; the app does not load .env or Dart defines for these values.
-4. Verify the existing tables, trusted signup trigger, protected roles, RLS, necessary public catalogue reads and related profile reads. Provision a manager through a trusted process; the login selector does not assign roles.
-5. Verify the `property-images` bucket and policies. The included SQL is manual guidance, not automatically applied setup.
-6. Android INTERNET permission and iOS photo-library usage text are configured. Use a real/emulated device to verify gallery behavior and network access.
+Supabase Row Level Security policies provide the primary backend authorization layer.
 
-## Run
-
-```bash
-flutter pub get
-flutter run
-```
-
-## Testing
-
-```bash
-dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test
-```
-
-Tests are network-independent and cover authentication, renter flows, property CRUD, ownership predicates, favorites, viewing status rules, mocked gallery/Storage failures and responsive contact-sheet behavior. They do not connect to live Supabase or certify RLS. See [the final audit](FINAL_PROJECT_AUDIT.md) for the latest executed counts/results and limitations.
-
-## Build APK
-
-```bash
-flutter build apk --debug
-flutter build apk --release
-```
-
-Outputs are under `build/app/outputs/flutter-apk/`. The current package is `com.example.roomstay_mobile`; release uses debug signing for classroom sideloading. This is not Play Store signing configuration. Keep the APK matched to its tested source commit/archive.
+---
 
 ## Demo Accounts
 
-Prepare a renter and a provisioned Property Manager privately. For security verification, prepare a second manager and renter. **No real credentials are published here.** Any presentation accounts should be disposable, clearly demo-only, and shared through an appropriate private channel.
+The following disposable accounts can be used for classroom demonstration and testing.
+
+**Password for all demo accounts: `password123`**
+
+| Role | Email | Purpose |
+|---|---|---|
+| Renter | `renter@roomstay.test` | Main renter demonstration |
+| Property Manager | `partner@roomstay.test` | Main Property Manager demonstration |
+| Property Manager B | `managerb@roomstay.test` | Cross-manager security testing |
+
+> Property Managers use the internal database role `partner`, while the user interface displays **Property Manager**.
+
+---
+
+## Setup
+
+### 1. Install Flutter
+
+Check the Flutter environment:
+
+```bash
+flutter doctor
+```
+
+### 2. Clone the project
+
+```bash
+git clone https://github.com/SuYiNandar/roomstay_mobile.git
+cd roomstay_mobile
+```
+
+### 3. Install dependencies
+
+```bash
+flutter pub get
+```
+
+### 4. Configure Supabase
+
+The public Supabase configuration is located in:
+
+```text
+lib/config/supabase_config.dart
+```
+
+The application requires:
+
+- Supabase Project URL
+- Supabase Publishable Key
+
+Do not use a service-role key or database password in the Flutter application.
+
+### 5. Run the application
+
+```bash
+flutter run
+```
+
+If Dart Development Service causes a connection problem with the Android emulator:
+
+```bash
+flutter run -d emulator-5554 --disable-dds
+```
+
+---
+
+## Testing
+
+Run static analysis:
+
+```bash
+flutter analyze
+```
+
+Run automated tests:
+
+```bash
+flutter test
+```
+
+Final validated result:
+
+```text
+No issues found
+208 tests passed
+0 failures
+```
+
+The automated test suite covers areas including:
+
+- Authentication
+- Role-based navigation
+- Property mapping
+- Property CRUD
+- Property Manager authorization
+- Favorites
+- Viewing request CRUD
+- Viewing status rules
+- Search and Home category filters
+- Contact Property Manager
+- Image and media handling
+- Loading states
+- Error states
+- Empty states
+- Responsive layouts
+
+---
+
+## Build APK
+
+Build a debug APK:
+
+```bash
+flutter build apk --debug
+```
+
+Build a release APK:
+
+```bash
+flutter build apk --release
+```
+
+Generated APK files are located under:
+
+```text
+build/app/outputs/flutter-apk/
+```
+
+The final release APK was successfully built and validated for the CSC452 project submission.
+
+---
+
+## Final Validation
+
+Before the final project submission, the following checks were completed:
+
+- Flutter formatting passed
+- Flutter analyzer passed with no issues
+- 208 automated tests passed
+- Debug APK built successfully
+- Release APK built successfully
+- Renter login tested
+- Property Manager login tested
+- Property CRUD tested
+- Favorites tested
+- Viewing request workflow tested
+- Cross-manager property authorization tested
+- Cross-manager viewing authorization tested
+- Renter viewing-status protection tested
+- Storage upload authorization tested
+- Launcher icon added
+- Responsive manager empty states tested
+
+---
 
 ## MVP Limitations
 
-- No realtime chat, payments, booking, maps, notifications, reviews or admin dashboard.
-- One property image; old Storage files may remain after replacement/removal.
-- Session is memory-only; no automatic token refresh or HTTP timeout. Log in again after expiry.
-- Status updates require refresh/reopening; Search state resets when switching tabs.
-- Forgot-password is a placeholder; Terms/privacy text is not a policy-document route.
-- Mobile rent input is whole baht; external fractional rents are not represented accurately by the integer model.
-- Home category shortcuts preselect Search filters. Named-area shortcuts (for example Sukhumvit) still open Search without prefilled text.
-- Duplicate viewing requests and Android picker process-loss recovery need further work.
-- Cross-manager property/viewing protection, renter status protection and forbidden Storage uploads were reported live-tested by the project owner on 22 November 2026; see the security checklist. Remaining grant/trigger/FK cases and the exact final APK rehearsal are separate checks. iOS build/runtime is not verified.
+The current RoomStay version intentionally focuses on the main rental and viewing workflow.
+
+The following features are outside the current project scope:
+
+- Realtime chat
+- Online payments
+- Rental booking
+- Maps and GPS
+- Reviews
+- Push notifications
+- Analytics
+- Admin dashboard
+- Multiple property images
+
+Additional limitations:
+
+- One image is stored per property.
+- Replaced Storage images may leave old files in the Storage bucket.
+- User sessions are stored in memory.
+- There is no automatic token refresh.
+- Forgot Password is currently a placeholder.
+- Viewing status updates may require reopening or refreshing the screen.
+- Duplicate viewing requests are not automatically prevented.
+
+---
 
 ## Future Improvements
 
-Bounded requests and session recovery, state preservation, named-area shortcut behavior, Android form recovery, pagination, reference-aware image cleanup, and a reproducible schema/runbook. Keep final submission focused on reliable existing flows.
+Possible future improvements include:
 
-## Final Demo Checklist
+- Realtime chat between renters and Property Managers
+- Push notifications
+- Multiple property images
+- Rental booking
+- Payment integration
+- Maps and location services
+- Reviews and ratings
+- Pagination
+- Automatic session refresh
+- Improved image cleanup
+- Duplicate viewing prevention
+- Admin management features
 
-Follow [FINAL_DEMO_CHECKLIST.md](docs/FINAL_DEMO_CHECKLIST.md), then record [manual security results](docs/SECURITY_LIVE_TEST_CHECKLIST.md). Review [FINAL_SOURCE_CHECKLIST.md](docs/FINAL_SOURCE_CHECKLIST.md) before committing or creating the submission archive. Current evidence and scores are in [FINAL_PROJECT_AUDIT.md](FINAL_PROJECT_AUDIT.md).
+---
+
+## Project Information
+
+**Project Name:** RoomStay  
+**Course:** CSC452 Flutter Mobile Programming  
+**Project Type:** University Final Project  
+**Platform:** Flutter Mobile Application  
+**Backend:** Supabase  
+
+---
+
+## Repository
+
+```text
+https://github.com/SuYiNandar/roomstay_mobile
+```
