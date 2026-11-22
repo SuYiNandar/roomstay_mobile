@@ -1,6 +1,10 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
-import '../data/sample_properties.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../config/supabase_config.dart';
+import '../models/property.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/property_card.dart';
@@ -10,32 +14,51 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
     required this.onSearchRequested,
+    this.onCategorySelected,
     required this.favoriteIds,
     required this.onFavoriteToggle,
     required this.onPropertySelected,
   });
 
   final VoidCallback onSearchRequested;
-  final List<int> favoriteIds;
+  final ValueChanged<String>? onCategorySelected;
+  final Set<int> favoriteIds;
   final void Function(int propertyId) onFavoriteToggle;
   final void Function(int propertyId) onPropertySelected;
 
   static const _popularSearches = [
     'Sukhumvit',
-    'Near BTS',
+    'Near Transit',
     'Pet friendly',
     'Chulalongkorn University',
   ];
 
   static const _categories = [
-    _CategoryItem(label: 'Apartments', icon: Icons.apartment),
-    _CategoryItem(label: 'Condos', icon: Icons.domain),
-    _CategoryItem(label: 'Houses', icon: Icons.home_outlined),
-    _CategoryItem(label: 'Dormitories', icon: Icons.meeting_room_outlined),
-    _CategoryItem(label: 'Pet friendly', icon: Icons.favorite_border),
-    _CategoryItem(label: 'Near University', icon: Icons.school_outlined),
     _CategoryItem(
-      label: 'Near BTS/MRT',
+      label: 'Apartments',
+      filter: 'Apartment',
+      icon: Icons.apartment,
+    ),
+    _CategoryItem(label: 'Condos', filter: 'Condo', icon: Icons.domain),
+    _CategoryItem(label: 'Houses', filter: 'House', icon: Icons.home_outlined),
+    _CategoryItem(
+      label: 'Dormitories',
+      filter: 'Dormitory',
+      icon: Icons.meeting_room_outlined,
+    ),
+    _CategoryItem(
+      label: 'Pet friendly',
+      filter: 'Pet friendly',
+      icon: Icons.favorite_border,
+    ),
+    _CategoryItem(
+      label: 'Near University',
+      filter: 'Near University',
+      icon: Icons.school_outlined,
+    ),
+    _CategoryItem(
+      label: 'Near Transit',
+      filter: 'Near Transit',
       icon: Icons.directions_subway_outlined,
     ),
   ];
@@ -46,6 +69,14 @@ class HomeScreen extends StatelessWidget {
     _HowItWorksStep(title: 'Save', icon: Icons.favorite_border),
     _HowItWorksStep(title: 'Request', icon: Icons.event_available_outlined),
   ];
+
+  void _openCategory(String filter) {
+    if (onCategorySelected != null) {
+      onCategorySelected!(filter);
+    } else {
+      onSearchRequested();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -179,13 +210,17 @@ class HomeScreen extends StatelessWidget {
                 color: AppColors.primary,
               ),
               SizedBox(width: 4),
-              Text(
-                'Ari, Bangkok',
-                style: TextStyle(
-                  fontFamily: AppTextStyles.fontFamily,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.brandText,
+              Flexible(
+                child: Text(
+                  'Ari, Bangkok',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: AppTextStyles.fontFamily,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.brandText,
+                  ),
                 ),
               ),
               Icon(
@@ -218,7 +253,13 @@ class HomeScreen extends StatelessWidget {
           children: [
             for (final search in _popularSearches)
               ActionChip(
-                onPressed: onSearchRequested,
+                onPressed: () {
+                  if (search == 'Pet friendly' || search == 'Near Transit') {
+                    _openCategory(search);
+                  } else {
+                    onSearchRequested();
+                  }
+                },
                 label: Text(search),
                 backgroundColor: AppColors.primaryTint,
                 side: const BorderSide(color: AppColors.coolBorder),
@@ -245,83 +286,247 @@ class HomeScreen extends StatelessWidget {
       children: [
         const Text('Popular categories', style: AppTextStyles.sectionTitle),
         const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 2.5,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            for (final category in _categories)
-              Material(
-                color: AppColors.surface,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: const BorderSide(color: AppColors.coolBorder),
-                ),
-                child: InkWell(
-                  onTap: onSearchRequested,
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryTint,
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          child: Icon(
-                            category.icon,
-                            size: 18,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            category.label,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontFamily: AppTextStyles.fontFamily,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.brandText,
-                              height: 1.15,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final itemWidth = (constraints.maxWidth - 10) / 2;
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (final category in _categories)
+                  SizedBox(
+                    width: itemWidth,
+                    child: Material(
+                      color: AppColors.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: const BorderSide(color: AppColors.coolBorder),
+                      ),
+                      child: InkWell(
+                        onTap: () => _openCategory(category.filter),
+                        borderRadius: BorderRadius.circular(12),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 52),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primaryTint,
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: Icon(
+                                    category.icon,
+                                    size: 18,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    category.label,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontFamily: AppTextStyles.fontFamily,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.brandText,
+                                      height: 1.15,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-          ],
+              ],
+            );
+          },
         ),
       ],
     );
   }
 
   Widget _buildRecentlyAdded() {
-    final properties = sampleProperties.take(3).toList();
+    return _RecentlyAddedSection(
+      favoriteIds: favoriteIds,
+      onFavoriteToggle: onFavoriteToggle,
+      onPropertySelected: onPropertySelected,
+      onSearchRequested: onSearchRequested,
+    );
+  }
 
+  Widget _buildHowItWorks() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text('Recently added', style: AppTextStyles.sectionTitle),
-            ),
-            TextButton(
-              onPressed: onSearchRequested,
+        const Text('How RoomStay Works', style: AppTextStyles.sectionTitle),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final itemWidth = (constraints.maxWidth - 10) / 2;
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (var index = 0; index < _steps.length; index++)
+                  SizedBox(
+                    width: itemWidth,
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 64),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.coolBorder),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: const BoxDecoration(
+                              color: AppColors.primaryTint,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _steps[index].icon,
+                              size: 18,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '0${index + 1}',
+                                  style: AppTextStyles.small.copyWith(
+                                    color: AppColors.tagline,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                                Text(
+                                  _steps[index].title,
+                                  style: AppTextStyles.body.copyWith(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.brandText,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _RecentlyAddedSection extends StatefulWidget {
+  const _RecentlyAddedSection({
+    required this.favoriteIds,
+    required this.onFavoriteToggle,
+    required this.onPropertySelected,
+    required this.onSearchRequested,
+  });
+
+  final Set<int> favoriteIds;
+  final void Function(int propertyId) onFavoriteToggle;
+  final void Function(int propertyId) onPropertySelected;
+  final VoidCallback onSearchRequested;
+  @override
+  State<_RecentlyAddedSection> createState() => _RecentlyAddedSectionState();
+}
+
+class _RecentlyAddedSectionState extends State<_RecentlyAddedSection> {
+  List<Property> _properties = [];
+  bool _isLoading = true;
+  String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchProperties();
+  }
+
+  Future<void> _fetchProperties() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('$supabaseUrl/rest/v1/properties?select=*&order=id.desc'),
+        headers: {'apikey': supabasePublishableKey},
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is! List) {
+          throw const FormatException('Expected properties list');
+        }
+        final properties = <Property>[];
+        for (final row in data) {
+          properties.add(
+            Property.fromSupabase(Map<String, dynamic>.from(row as Map)),
+          );
+        }
+        setState(() {
+          _properties = properties;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Unable to load properties.';
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Unable to load properties.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final title = const Text(
+              'Recently added',
+              style: AppTextStyles.sectionTitle,
+            );
+            final action = TextButton(
+              onPressed: widget.onSearchRequested,
               style: TextButton.styleFrom(
                 padding: EdgeInsets.zero,
                 minimumSize: Size.zero,
@@ -334,8 +539,23 @@ class HomeScreen extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-            ),
-          ],
+            );
+            if (MediaQuery.textScalerOf(context).scale(12) > 18) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  title,
+                  Align(alignment: Alignment.centerRight, child: action),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: title),
+                action,
+              ],
+            );
+          },
         ),
         const SizedBox(height: 2),
         const Text(
@@ -343,99 +563,86 @@ class HomeScreen extends StatelessWidget {
           style: AppTextStyles.secondaryBody,
         ),
         const SizedBox(height: 12),
-        for (var index = 0; index < properties.length; index++) ...[
-          if (index > 0) const SizedBox(height: 12),
-          PropertyCard(
-            property: properties[index],
-            isFavorite: favoriteIds.contains(properties[index].id),
-            onFavoritePressed: () {
-              onFavoriteToggle(properties[index].id);
-            },
-            onTap: () {
-              onPropertySelected(properties[index].id);
-            },
-          ),
-        ],
+        if (_isLoading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 28),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_errorMessage.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  _errorMessage,
+                  style: AppTextStyles.secondaryBody,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: _fetchProperties,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          )
+        else if (_properties.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Text(
+              'No properties are available yet.',
+              style: AppTextStyles.secondaryBody,
+              textAlign: TextAlign.center,
+            ),
+          )
+        else
+          for (
+            var index = 0;
+            index < _properties.length && index < 3;
+            index++
+          ) ...[
+            if (index > 0) const SizedBox(height: 12),
+            _buildPropertyCard(_properties[index]),
+          ],
       ],
     );
   }
 
-  Widget _buildHowItWorks() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('How RoomStay Works', style: AppTextStyles.sectionTitle),
-        const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 2.2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            for (var index = 0; index < _steps.length; index++)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.coolBorder),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: const BoxDecoration(
-                        color: AppColors.primaryTint,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        _steps[index].icon,
-                        size: 18,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '0${index + 1}',
-                            style: AppTextStyles.small.copyWith(
-                              color: AppColors.roofLavender,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 1,
-                            ),
-                          ),
-                          Text(
-                            _steps[index].title,
-                            style: AppTextStyles.body.copyWith(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.brandText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ],
+  Widget _buildPropertyCard(Property property) {
+    return PropertyCard(
+      property: property,
+      isFavorite: widget.favoriteIds.contains(property.id),
+      onFavoritePressed: () {
+        widget.onFavoriteToggle(property.id);
+      },
+      onTap: () {
+        widget.onPropertySelected(property.id);
+      },
     );
   }
 }
 
 class _CategoryItem {
-  const _CategoryItem({required this.label, required this.icon});
+  const _CategoryItem({
+    required this.label,
+    required this.filter,
+    required this.icon,
+  });
 
   final String label;
+  final String filter;
   final IconData icon;
 }
 

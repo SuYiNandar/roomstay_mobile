@@ -1,10 +1,15 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../config/supabase_config.dart';
+import '../data/user_session.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/roomstay_logo.dart';
 import 'main_screen.dart';
-import 'partner/partner_main_screen.dart';
+import 'property_manager_main_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -21,6 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String _selectedRole = 'Renter';
   bool _obscurePassword = true;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -53,23 +59,170 @@ class _LoginScreenState extends State<LoginScreen> {
     return null;
   }
 
-  void _login() {
+  Future<void> _login() async {
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    if (_selectedRole == 'Partner') {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const PartnerMainScreen()),
+    UserSession.clear();
+    setState(() {
+      _isLoading = true;
+    });
+
+    if (!isSupabaseConfigured) {
+      _showLoginError(
+        'Supabase is not configured. Add your project URL and publishable key.',
       );
       return;
     }
 
-    Navigator.pushReplacement(
+    try {
+      final response = await http.post(
+        Uri.parse('$supabaseUrl/auth/v1/token?grant_type=password'),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'email': _emailController.text.trim(),
+          'password': _passwordController.text,
+        }),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is! Map) {
+          _showLoginError('Unable to read the login session.');
+          return;
+        }
+        final user = data['user'];
+        final accessToken = data['access_token'];
+
+        if (accessToken is! String ||
+            accessToken.isEmpty ||
+            user is! Map ||
+            user['id'] is! String ||
+            user['id'].isEmpty) {
+          _showLoginError('Unable to read the login session.');
+          return;
+        }
+
+        UserSession.accessToken = accessToken;
+        UserSession.refreshToken = data['refresh_token']?.toString();
+        UserSession.userId = user['id'] as String;
+        UserSession.email =
+            user['email']?.toString() ?? _emailController.text.trim();
+
+        await _fetchProfileAndOpenApp();
+      } else {
+        _showLoginError(
+          _readAuthError(
+            response.body,
+            'Login failed. Please check your email and password.',
+          ),
+        );
+      }
+    } catch (error) {
+      _showLoginError('Unable to connect. Please check your network.');
+    }
+  }
+
+  Future<void> _fetchProfileAndOpenApp() async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+          '$supabaseUrl/rest/v1/profiles?id=eq.${UserSession.userId}&select=*',
+        ),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Authorization': 'Bearer ${UserSession.accessToken}',
+        },
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        if (data is List && data.isNotEmpty) {
+          final profile = Map<String, dynamic>.from(data[0] as Map);
+          UserSession.fullName = profile['full_name']?.toString();
+          UserSession.email = profile['email']?.toString() ?? UserSession.email;
+          final role = profile['role']?.toString().trim().toLowerCase() ?? '';
+          UserSession.role = role;
+
+          setState(() {
+            _isLoading = false;
+          });
+
+          if (role == 'renter') {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (context) => const MainScreen()),
+              (route) => false,
+            );
+          } else if (UserSession.isPropertyManager) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const PropertyManagerMainScreen(),
+              ),
+              (route) => false,
+            );
+          } else {
+            _showLoginError('This account role is not supported.');
+          }
+        } else {
+          _showLoginError('Unable to load your profile.');
+        }
+      } else {
+        _showLoginError('Unable to load your profile.');
+      }
+    } catch (error) {
+      _showLoginError('Unable to connect. Please check your network.');
+    }
+  }
+
+  String _readAuthError(String body, String fallback) {
+    try {
+      final data = jsonDecode(body);
+
+      if (data is Map) {
+        final message =
+            data['error_description'] ??
+            data['msg'] ??
+            data['message'] ??
+            data['error'];
+
+        if (message != null && message.toString().trim().isNotEmpty) {
+          return message.toString();
+        }
+      }
+    } catch (error) {
+      return fallback;
+    }
+
+    return fallback;
+  }
+
+  void _showLoginError(String message) {
+    if (!mounted) return;
+    UserSession.clear();
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    _showMessage(message);
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
       context,
-      MaterialPageRoute(builder: (context) => const MainScreen()),
-    );
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _openRegister() {
@@ -90,11 +243,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Expanded(
       child: ElevatedButton(
-        onPressed: () {
-          setState(() {
-            _selectedRole = role;
-          });
-        },
+        onPressed: _isLoading
+            ? null
+            : () {
+                setState(() {
+                  _selectedRole = role;
+                });
+              },
         style: ElevatedButton.styleFrom(
           backgroundColor: isSelected ? AppColors.primary : AppColors.surface,
           foregroundColor: isSelected ? Colors.white : AppColors.primary,
@@ -141,7 +296,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     _roleButton('Renter'),
                     const SizedBox(width: 10),
-                    _roleButton('Partner'),
+                    _roleButton('Property Manager'),
                   ],
                 ),
                 const SizedBox(height: 20),
@@ -194,8 +349,17 @@ class _LoginScreenState extends State<LoginScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _login,
-                    child: const Text('Login'),
+                    onPressed: _isLoading ? null : _login,
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Login'),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -208,7 +372,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: AppTextStyles.secondaryBody,
                     ),
                     TextButton(
-                      onPressed: _openRegister,
+                      onPressed: _isLoading ? null : _openRegister,
                       child: const Text('Create an account'),
                     ),
                   ],

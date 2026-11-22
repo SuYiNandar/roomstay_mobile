@@ -1,7 +1,8 @@
+import 'support/test_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:roomstay_mobile/data/demo_viewings.dart';
+import 'package:roomstay_mobile/data/user_session.dart';
 import 'package:roomstay_mobile/main.dart';
 import 'package:roomstay_mobile/screens/login_screen.dart';
 import 'package:roomstay_mobile/screens/main_screen.dart';
@@ -9,9 +10,12 @@ import 'package:roomstay_mobile/theme/app_theme.dart';
 import 'package:roomstay_mobile/widgets/property_card.dart';
 
 void main() {
-  setUp(resetDemoViewings);
+  setUp(() {
+    UserSession.clear();
+    resetTestBackend();
+  });
 
-  testWidgets('RoomStayApp starts at splash and opens the login screen', (
+  testWithApi('RoomStayApp starts at splash and opens the login screen', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const RoomStayApp());
@@ -24,7 +28,7 @@ void main() {
     expect(find.text('Welcome back'), findsOneWidget);
   });
 
-  testWidgets('Login shows validation errors when fields are empty', (
+  testWithApi('Login shows validation errors when fields are empty', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -38,7 +42,7 @@ void main() {
     expect(find.text('Password is required'), findsOneWidget);
   });
 
-  testWidgets('Login form validates and opens the main screen', (
+  testWithApi('Login form validates and opens the main screen', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -58,7 +62,7 @@ void main() {
     expect(find.byType(NavigationDestination), findsNWidgets(5));
   });
 
-  testWidgets('Register validates and returns to login', (
+  testWithApi('Register validates and returns to login', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -70,13 +74,21 @@ void main() {
     await tester.tap(find.text('Create an account'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Create Account'), findsWidgets);
-
-    await tester.ensureVisible(
-      find.widgetWithText(ElevatedButton, 'Create Account'),
+    expect(find.text('Create your account'), findsOneWidget);
+    expect(
+      find.text(
+        'Sign up to find your next home and manage your rental journey.',
+      ),
+      findsOneWidget,
     );
+    expect(
+      find.text('I agree to the Terms of Service and Privacy Policy.'),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(find.widgetWithText(ElevatedButton, 'Sign Up'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ElevatedButton, 'Create Account'));
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Sign Up'));
     await tester.pump();
 
     expect(find.text('Full name is required'), findsOneWidget);
@@ -92,7 +104,62 @@ void main() {
     expect(find.text('Welcome back'), findsOneWidget);
   });
 
-  testWidgets('Main screen has five MVP destinations that open', (
+  testWithApi(
+    'Register enforces every password rule and matching confirmation',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(theme: AppTheme.lightTheme, home: const LoginScreen()),
+      );
+      await tester.ensureVisible(find.text('Create an account'));
+      await tester.tap(find.text('Create an account'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Minimum 8 characters\n'
+          'At least 1 uppercase letter\n'
+          'At least 1 lowercase letter\n'
+          'At least 1 number',
+        ),
+        findsOneWidget,
+      );
+      final fields = find.byType(TextFormField);
+      await tester.enterText(fields.at(0), 'Student Renter');
+      await tester.enterText(fields.at(1), 'student@example.com');
+      await tester.ensureVisible(find.byType(Checkbox));
+      await tester.tap(find.byType(Checkbox));
+
+      final invalidPasswords = {
+        'Abcdef1': 'Password must be at least 8 characters',
+        'abcdefg1': 'Password must include an uppercase letter',
+        'ABCDEFG1': 'Password must include a lowercase letter',
+        'Abcdefgh': 'Password must include a number',
+      };
+      for (final entry in invalidPasswords.entries) {
+        await tester.enterText(fields.at(2), entry.key);
+        await tester.enterText(fields.at(3), entry.key);
+        await tester.ensureVisible(
+          find.widgetWithText(ElevatedButton, 'Sign Up'),
+        );
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Sign Up'));
+        await tester.pumpAndSettle();
+        expect(find.text(entry.value), findsOneWidget);
+        expect(apiRequests, isEmpty);
+      }
+
+      await tester.enterText(fields.at(2), 'Test1234');
+      await tester.enterText(fields.at(3), 'Test1235');
+      await tester.ensureVisible(
+        find.widgetWithText(ElevatedButton, 'Sign Up'),
+      );
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Sign Up'));
+      await tester.pumpAndSettle();
+      expect(find.text('Passwords do not match'), findsOneWidget);
+      expect(apiRequests, isEmpty);
+    },
+  );
+
+  testWithApi('Main screen has five MVP destinations that open', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -143,7 +210,7 @@ void main() {
     expect(find.text("A PLACE FOR WHAT'S NEXT"), findsOneWidget);
   });
 
-  testWidgets('Home search entry points switch to the search tab', (
+  testWithApi('Home search entry points switch to the search tab', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -195,12 +262,13 @@ void main() {
     );
   });
 
-  testWidgets('Favorites show a saved room and support the empty state', (
+  testWithApi('Favorites show a saved room and support the empty state', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
       MaterialApp(theme: AppTheme.lightTheme, home: const MainScreen()),
     );
+    await tester.pumpAndSettle();
 
     expect(find.byType(PropertyCard), findsNWidgets(3));
 
@@ -245,7 +313,7 @@ void main() {
     );
   });
 
-  testWidgets('My Viewings shows sample requests with statuses', (
+  testWithApi('My Viewings shows sample requests with statuses', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -266,9 +334,16 @@ void main() {
     expect(find.text('Cozy Studio near RSU'), findsOneWidget);
   });
 
-  testWidgets('Profile shows the demo user and logout returns to login', (
+  testWithApi('Profile shows the signed-in user and logout returns to login', (
     WidgetTester tester,
   ) async {
+    UserSession.accessToken = 'test-access-token';
+    UserSession.refreshToken = 'test-refresh-token';
+    UserSession.userId = 'test-user-id';
+    UserSession.email = 'suyinandar@example.com';
+    UserSession.fullName = 'Su Yi Nandar';
+    UserSession.role = 'renter';
+
     await tester.pumpWidget(
       MaterialApp(theme: AppTheme.lightTheme, home: const MainScreen()),
     );
@@ -292,9 +367,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Welcome back'), findsOneWidget);
+    expect(UserSession.accessToken, isNull);
+    expect(UserSession.refreshToken, isNull);
+    expect(UserSession.userId, isNull);
+    expect(UserSession.email, isNull);
+    expect(UserSession.fullName, isNull);
+    expect(UserSession.role, isNull);
   });
 
-  testWidgets('Home renders without overflow on a mobile screen', (
+  testWithApi('Home renders without overflow on a mobile screen', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(390, 844);

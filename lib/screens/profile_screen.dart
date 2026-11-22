@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/user_session.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import 'login_screen.dart';
@@ -7,22 +8,39 @@ import 'login_screen.dart';
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
     super.key,
-    required this.onFavoritesSelected,
-    required this.onViewingsSelected,
+    this.onFavoritesSelected,
+    this.onViewingsSelected,
   });
 
-  final VoidCallback onFavoritesSelected;
-  final VoidCallback onViewingsSelected;
+  final VoidCallback? onFavoritesSelected;
+  final VoidCallback? onViewingsSelected;
 
   void _logout(BuildContext context) {
-    Navigator.pushReplacement(
+    UserSession.clear();
+
+    Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
     );
+  }
+
+  String _displayRole() {
+    if (UserSession.isPropertyManager) return 'Property Manager';
+    final role = UserSession.role?.trim() ?? '';
+
+    if (role.isEmpty || role == 'renter') {
+      return 'Renter';
+    }
+
+    return role;
   }
 
   @override
   Widget build(BuildContext context) {
+    final fullName = UserSession.fullName?.trim() ?? '';
+    final email = UserSession.email?.trim() ?? '';
+
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: SingleChildScrollView(
@@ -53,9 +71,9 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Su Yi Nandar',
-                    style: TextStyle(
+                  Text(
+                    fullName.isEmpty ? 'RoomStay User' : fullName,
+                    style: const TextStyle(
                       fontFamily: AppTextStyles.fontFamily,
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
@@ -63,10 +81,10 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const Text('Renter', style: AppTextStyles.secondaryBody),
+                  Text(_displayRole(), style: AppTextStyles.secondaryBody),
                   const SizedBox(height: 4),
                   Text(
-                    'suyinandar@example.com',
+                    email.isEmpty ? 'No email available' : email,
                     style: AppTextStyles.small.copyWith(fontSize: 12),
                   ),
                 ],
@@ -82,26 +100,30 @@ class ProfileScreen extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  ListTile(
-                    leading: const Icon(
-                      Icons.favorite_border,
-                      color: AppColors.primary,
+                  if (onFavoritesSelected != null) ...[
+                    ListTile(
+                      leading: const Icon(
+                        Icons.favorite_border,
+                        color: AppColors.primary,
+                      ),
+                      title: const Text('My Favorites'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: onFavoritesSelected,
                     ),
-                    title: const Text('My Favorites'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: onFavoritesSelected,
-                  ),
-                  const Divider(height: 1, color: AppColors.border),
-                  ListTile(
-                    leading: const Icon(
-                      Icons.event_available_outlined,
-                      color: AppColors.primary,
+                    const Divider(height: 1, color: AppColors.border),
+                  ],
+                  if (onViewingsSelected != null) ...[
+                    ListTile(
+                      leading: const Icon(
+                        Icons.event_available_outlined,
+                        color: AppColors.primary,
+                      ),
+                      title: const Text('My Viewings'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: onViewingsSelected,
                     ),
-                    title: const Text('My Viewings'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: onViewingsSelected,
-                  ),
-                  const Divider(height: 1, color: AppColors.border),
+                    const Divider(height: 1, color: AppColors.border),
+                  ],
                   ListTile(
                     leading: const Icon(Icons.logout, color: AppColors.error),
                     title: const Text('Logout'),

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../data/partner_demo_data.dart';
-import '../../theme/app_colors.dart';
-import '../../theme/app_text_styles.dart';
+import '../../fixtures/partner_demo_data.dart';
+import 'package:roomstay_mobile/theme/app_colors.dart';
+import 'package:roomstay_mobile/theme/app_text_styles.dart';
 
 class PartnerViewingsScreen extends StatefulWidget {
   const PartnerViewingsScreen({super.key});

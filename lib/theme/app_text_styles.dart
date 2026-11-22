@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
 class AppTextStyles {
-  static const String fontFamily = 'Inter';
+  static const String? fontFamily = null;
 
   static const TextStyle h1 = TextStyle(
     fontFamily: fontFamily,

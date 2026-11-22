@@ -1,7 +1,10 @@
+import 'dart:convert';
+import 'support/test_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:roomstay_mobile/data/demo_viewings.dart';
+import 'fixtures/demo_viewings.dart';
+import 'package:roomstay_mobile/data/viewing_helpers.dart';
 import 'package:roomstay_mobile/screens/main_screen.dart';
 import 'package:roomstay_mobile/screens/update_viewing_screen.dart';
 import 'package:roomstay_mobile/theme/app_theme.dart';
@@ -22,9 +25,11 @@ Future<void> pumpMyViewings(WidgetTester tester) async {
 }
 
 void main() {
-  setUp(resetDemoViewings);
+  setUp(() {
+    resetTestBackend();
+  });
 
-  testWidgets('My Viewings loads viewing records with actions', (
+  testWithApi('My Viewings loads viewing records with actions', (
     WidgetTester tester,
   ) async {
     await pumpMyViewings(tester);
@@ -34,11 +39,11 @@ void main() {
     expect(find.text('Pending'), findsOneWidget);
     expect(find.text('Approved'), findsOneWidget);
     expect(find.text('Cancelled'), findsOneWidget);
-    expect(find.widgetWithText(TextButton, 'Edit'), findsNWidgets(3));
-    expect(find.widgetWithText(TextButton, 'Cancel'), findsNWidgets(3));
+    expect(find.widgetWithText(TextButton, 'Edit'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Cancel'), findsOneWidget);
   });
 
-  testWidgets('Edit Viewing loads current values and saves changes', (
+  testWithApi('Edit Viewing loads current values and saves changes', (
     WidgetTester tester,
   ) async {
     await pumpMyViewings(tester);
@@ -48,7 +53,7 @@ void main() {
 
     expect(find.byType(UpdateViewingScreen), findsOneWidget);
     expect(find.text('Update viewing'), findsOneWidget);
-    expect(find.text('20/11/2026'), findsOneWidget);
+    expect(find.text('20/11/2030'), findsOneWidget);
 
     await tester.enterText(
       find.byType(TextFormField).at(2),
@@ -68,12 +73,22 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Cancel removes a viewing from My Viewings', (
+  testWithApi('Cancel asks for confirmation and then removes a viewing', (
     WidgetTester tester,
   ) async {
     await pumpMyViewings(tester);
 
     await tester.tap(find.widgetWithText(TextButton, 'Cancel').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cancel viewing?'), findsOneWidget);
+    expect(
+      find.text('Are you sure you want to cancel this viewing?'),
+      findsOneWidget,
+    );
+    expect(demoViewings.length, 3);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Yes, Cancel'));
     await tester.pump();
 
     expect(find.text('Viewing cancelled successfully.'), findsOneWidget);
@@ -83,7 +98,34 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Request Viewing creates a record shown in My Viewings', (
+  testWithApi('Cancel confirmation can be dismissed with No', (
+    WidgetTester tester,
+  ) async {
+    await pumpMyViewings(tester);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel').first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(TextButton, 'No'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cancel viewing?'), findsNothing);
+    expect(find.text('Cozy Studio near RSU'), findsOneWidget);
+    expect(demoViewings.length, 3);
+  });
+
+  testWithApi('My Viewings shows the empty state when there are no records', (
+    WidgetTester tester,
+  ) async {
+    demoViewings.clear();
+
+    await pumpMyViewings(tester);
+
+    expect(find.text('No viewing requests yet.'), findsOneWidget);
+    expect(find.text('Choose a room and request a viewing.'), findsOneWidget);
+  });
+
+  testWithApi('Request Viewing creates a record shown in My Viewings', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -130,9 +172,21 @@ void main() {
     await tester.pump();
 
     expect(find.text('Viewing request submitted successfully.'), findsWidgets);
+    final request = apiRequests.firstWhere(
+      (request) =>
+          request.method == 'POST' && request.url.path == '/rest/v1/viewings',
+    );
+    final body = jsonDecode(request.body);
+    expect(body['renter_id'], 'test-user-id');
+    expect(body['property_id'], 4);
+    expect(body['viewing_date'], matches(RegExp(r'^\d{4}-\d{2}-\d{2}$')));
+    expect(body['viewing_time'], matches(RegExp(r'^\d{2}:\d{2}:00$')));
+    expect(request.headers['Authorization'], 'Bearer test-access-token');
+
     expect(
       demoViewings.any(
-        (viewing) => viewing['propertyName'] == 'Sunlit Apartment near Ari BTS',
+        (viewing) =>
+            viewingPropertyName(viewing) == 'Sunlit Apartment near Ari BTS',
       ),
       isTrue,
     );
@@ -148,9 +202,6 @@ void main() {
         matching: find.text('My Viewings'),
       ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.drag(find.byType(ListView), const Offset(0, -350));
     await tester.pumpAndSettle();
 
     expect(find.text('Sunlit Apartment near Ari BTS'), findsOneWidget);

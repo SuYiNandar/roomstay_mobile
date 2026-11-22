@@ -3,14 +3,16 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-import '../data/api_config.dart';
-import '../data/demo_viewings.dart';
+import '../config/supabase_config.dart';
+import '../data/user_session.dart';
+import '../data/viewing_helpers.dart';
 import '../theme/app_text_styles.dart';
 
 class UpdateViewingScreen extends StatefulWidget {
-  const UpdateViewingScreen({super.key, required this.id});
+  const UpdateViewingScreen({super.key, required this.id, this.now});
 
-  final int id;
+  final dynamic id;
+  final DateTime Function()? now;
 
   @override
   State<UpdateViewingScreen> createState() => _UpdateViewingScreenState();
@@ -25,7 +27,7 @@ class _UpdateViewingScreenState extends State<UpdateViewingScreen> {
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   String _propertyName = '';
-  int _propertyId = 0;
+  String _viewingStatus = '';
   bool _isLoading = true;
   bool _isSaving = false;
   String _errorMessage = '';
@@ -44,58 +46,69 @@ class _UpdateViewingScreenState extends State<UpdateViewingScreen> {
     super.dispose();
   }
 
-  Map<String, dynamic>? _findDemoViewing() {
-    for (final viewing in demoViewings) {
-      if (viewing['id'] == widget.id) {
-        return viewing;
-      }
+  DateTime _currentTime() => widget.now?.call() ?? DateTime.now();
+
+  void _loadViewing(Map<String, dynamic> viewing) {
+    final status = viewing['status']?.toString() ?? '';
+    if (!isPendingViewingStatus(status)) {
+      setState(() {
+        _viewingStatus = status;
+        _isLoading = false;
+        _errorMessage = pendingViewingModificationMessage;
+      });
+      return;
     }
-    return null;
+
+    _selectedDate = parseViewingDate(viewing['viewing_date']);
+    _selectedTime = parseViewingTime(viewing['viewing_time']);
+
+    _dateController.text = displayViewingDate(viewing['viewing_date']);
+    _timeController.text = displayViewingTime(viewing['viewing_time']);
+    _messageController.text = viewing['message']?.toString() ?? '';
+
+    setState(() {
+      _propertyName = viewingPropertyName(viewing);
+      _viewingStatus = status;
+      _isLoading = false;
+      _errorMessage = '';
+    });
   }
 
   Future<void> _fetchViewing() async {
-    if (apiUrl == 'YOUR_API_URL') {
-      final viewing = _findDemoViewing();
-
-      if (viewing == null) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Viewing not found.';
-        });
-        return;
-      }
-
-      _dateController.text = viewing['viewingDate'] ?? '';
-      _timeController.text = viewing['viewingTime'] ?? '';
-      _messageController.text = viewing['message'] ?? '';
-
+    if (UserSession.accessToken == null || UserSession.userId == null) {
       setState(() {
-        _propertyName = viewing['propertyName'] ?? '';
-        _propertyId = viewing['propertyId'] ?? 0;
         _isLoading = false;
-        _errorMessage = '';
+        _errorMessage = 'Please log in again.';
       });
       return;
     }
 
     try {
-      final res = await http.get(Uri.parse('$apiUrl/viewings/${widget.id}'));
+      final res = await http.get(
+        Uri.parse(
+          '$supabaseUrl/rest/v1/viewings?id=eq.${widget.id}'
+          '&renter_id=eq.${UserSession.userId}'
+          '&select=*,properties(name,location,image_url)',
+        ),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Authorization': 'Bearer ${UserSession.accessToken}',
+        },
+      );
 
       if (!mounted) return;
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
 
-        _dateController.text = data['viewingDate'] ?? '';
-        _timeController.text = data['viewingTime'] ?? '';
-        _messageController.text = data['message'] ?? '';
-
-        setState(() {
-          _propertyName = data['propertyName'] ?? '';
-          _propertyId = data['propertyId'] ?? 0;
-          _isLoading = false;
-          _errorMessage = '';
-        });
+        if (data is List && data.isNotEmpty) {
+          _loadViewing(Map<String, dynamic>.from(data[0] as Map));
+        } else {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'Viewing not found.';
+          });
+        }
       } else {
         setState(() {
           _isLoading = false;
@@ -112,27 +125,30 @@ class _UpdateViewingScreenState extends State<UpdateViewingScreen> {
   }
 
   Future<void> _pickDate() async {
-    final now = DateTime.now();
+    final today = DateUtils.dateOnly(_currentTime());
+    final lastDate = today.add(const Duration(days: 365));
+    var initialDate = _selectedDate ?? today.add(const Duration(days: 1));
+    if (initialDate.isBefore(today)) initialDate = today;
+    if (initialDate.isAfter(lastDate)) initialDate = lastDate;
     final selected = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? now.add(const Duration(days: 1)),
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
+      initialDate: initialDate,
+      firstDate: today,
+      lastDate: lastDate,
     );
 
     if (selected == null || !mounted) return;
 
     setState(() {
       _selectedDate = selected;
-      _dateController.text =
-          '${selected.day.toString().padLeft(2, '0')}/${selected.month.toString().padLeft(2, '0')}/${selected.year}';
+      _dateController.text = displayViewingDate(supabaseDate(selected));
     });
   }
 
   Future<void> _pickTime() async {
     final selected = await showTimePicker(
       context: context,
-      initialTime: _selectedTime ?? TimeOfDay.now(),
+      initialTime: _selectedTime ?? TimeOfDay.fromDateTime(_currentTime()),
     );
 
     if (selected == null || !mounted) return;
@@ -144,69 +160,83 @@ class _UpdateViewingScreenState extends State<UpdateViewingScreen> {
   }
 
   Future<void> _updateViewing() async {
+    if (_isSaving) return;
+    if (!isPendingViewingStatus(_viewingStatus)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(pendingViewingModificationMessage)),
+      );
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedDate == null || _selectedTime == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a date and time.')),
+      );
+      return;
+    }
+
+    if (!isFutureViewingDateTime(
+      _selectedDate!,
+      _selectedTime!,
+      now: _currentTime(),
+    )) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(futureViewingTimeMessage)));
+      return;
+    }
+
+    final updatedDate = supabaseDate(_selectedDate!);
+    final updatedTime = supabaseTime(_selectedTime!);
+    final message = _messageController.text.trim();
+
+    if (UserSession.accessToken == null || UserSession.userId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please log in again.')));
+      return;
+    }
 
     setState(() {
       _isSaving = true;
     });
 
-    if (apiUrl == 'YOUR_API_URL') {
-      final viewing = _findDemoViewing();
-
-      if (viewing == null) {
-        setState(() {
-          _isSaving = false;
-          _errorMessage = 'Viewing not found.';
-        });
-        return;
-      }
-
-      viewing['viewingDate'] = _dateController.text;
-      viewing['viewingTime'] = _timeController.text;
-      viewing['message'] = _messageController.text;
+    try {
+      final res = await http.patch(
+        Uri.parse(
+          '$supabaseUrl/rest/v1/viewings?id=eq.${widget.id}'
+          '&renter_id=eq.${UserSession.userId}&status=eq.Pending',
+        ),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Authorization': 'Bearer ${UserSession.accessToken}',
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: jsonEncode({
+          'viewing_date': updatedDate,
+          'viewing_time': updatedTime,
+          'message': message,
+        }),
+      );
 
       if (!mounted) return;
+
+      final rows = res.statusCode == 200 ? jsonDecode(res.body) : null;
       setState(() {
         _isSaving = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Viewing updated successfully.')),
-      );
-      Navigator.pop(context);
-      return;
-    }
-
-    try {
-      final headers = {'Content-Type': 'application/json'};
-
-      final body = jsonEncode({
-        'propertyId': _propertyId,
-        'propertyName': _propertyName,
-        'viewingDate': _dateController.text,
-        'viewingTime': _timeController.text,
-        'message': _messageController.text,
-      });
-
-      final res = await http.put(
-        Uri.parse('$apiUrl/viewings/${widget.id}'),
-        headers: headers,
-        body: body,
-      );
-
-      if (!mounted) return;
-
-      if (res.statusCode == 200) {
-        setState(() {
-          _isSaving = false;
-        });
+      if (rows is List && rows.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Viewing updated successfully.')),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
+      } else if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(pendingViewingModificationMessage)),
+        );
       } else {
-        setState(() {
-          _isSaving = false;
-        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unable to update viewing.')),
         );
@@ -293,7 +323,8 @@ class _UpdateViewingScreenState extends State<UpdateViewingScreen> {
                       textCapitalization: TextCapitalization.sentences,
                       decoration: const InputDecoration(
                         labelText: 'Message (optional)',
-                        hintText: 'Share anything the partner should know',
+                        hintText:
+                            'Share anything the property manager should know',
                         alignLabelWithHint: true,
                       ),
                     ),
@@ -304,7 +335,10 @@ class _UpdateViewingScreenState extends State<UpdateViewingScreen> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Text('Update Viewing'),
                     ),

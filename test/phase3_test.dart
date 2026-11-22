@@ -1,8 +1,9 @@
+import 'support/test_backend.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:roomstay_mobile/data/demo_viewings.dart';
-import 'package:roomstay_mobile/data/sample_properties.dart';
+import 'fixtures/sample_properties.dart';
 import 'package:roomstay_mobile/screens/main_screen.dart';
 import 'package:roomstay_mobile/screens/room_detail_screen.dart';
 import 'package:roomstay_mobile/theme/app_theme.dart';
@@ -12,6 +13,7 @@ Future<void> pumpSearchScreen(WidgetTester tester) async {
   await tester.pumpWidget(
     MaterialApp(theme: AppTheme.lightTheme, home: const MainScreen()),
   );
+
   await tester.pumpAndSettle();
 
   await tester.tap(
@@ -20,6 +22,7 @@ Future<void> pumpSearchScreen(WidgetTester tester) async {
       matching: find.text('Search'),
     ),
   );
+
   await tester.pumpAndSettle();
 }
 
@@ -30,153 +33,208 @@ Future<void> pumpRoomDetail(WidgetTester tester) async {
       home: RoomDetailScreen(
         id: sampleProperties.first.id,
         isFavorite: false,
-        onFavoriteToggle: () {},
+        onFavoriteToggle: () async => true,
       ),
     ),
   );
+
   await tester.pumpAndSettle();
 }
 
 void main() {
-  setUp(resetDemoViewings);
+  setUp(() {
+    resetTestBackend();
+  });
 
-  testWidgets('Search filters by keyword and shows an empty state', (
+  testWithApi('Search filters by keyword and shows an empty state', (
     WidgetTester tester,
   ) async {
     await pumpSearchScreen(tester);
 
     expect(find.text('8 rooms found'), findsOneWidget);
+
     expect(find.byType(PropertyCard), findsNWidgets(8));
 
     await tester.enterText(find.byType(TextField), 'RSU');
+
     await tester.pump();
 
     expect(find.text('1 room found'), findsOneWidget);
+
     expect(find.text('Cozy Studio near RSU'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'zzzz');
+
     await tester.pump();
 
     expect(find.text('No rooms found'), findsOneWidget);
+
     expect(find.text('Try changing your search or filters.'), findsOneWidget);
 
     await tester.ensureVisible(find.text('Reset Filters'));
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.text('Reset Filters'));
+
     await tester.pump();
 
     expect(find.text('8 rooms found'), findsOneWidget);
   });
 
-  testWidgets('Quick filters and sorting update the results', (
+  testWithApi('Quick filters and sorting update the results', (
     WidgetTester tester,
   ) async {
     await pumpSearchScreen(tester);
 
     await tester.tap(find.widgetWithText(FilterChip, 'Pet friendly'));
+
     await tester.pump();
 
     expect(find.text('3 rooms found'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(FilterChip, 'Pet friendly'));
+
     await tester.pump();
 
     await tester.tap(find.byType(DropdownButton<String>));
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.text('Price: Low to High').last);
+
     await tester.pumpAndSettle();
 
     final lowToHigh = tester
         .widgetList<PropertyCard>(find.byType(PropertyCard))
         .toList();
+
     expect(lowToHigh.first.property.monthlyRent, 4800);
 
     await tester.tap(find.byType(DropdownButton<String>));
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.text('Price: High to Low').last);
+
     await tester.pumpAndSettle();
 
     final highToLow = tester
         .widgetList<PropertyCard>(find.byType(PropertyCard))
         .toList();
+
     expect(highToLow.first.property.monthlyRent, 20000);
   });
 
-  testWidgets('More filters apply and reset from the bottom sheet', (
+  testWithApi('More filters apply and reset from the bottom sheet', (
     WidgetTester tester,
   ) async {
     await pumpSearchScreen(tester);
 
     await tester.tap(find.text('More Filters'));
+
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(ChoiceChip, 'Dormitory'));
+
     await tester.pump();
+
     await tester.tap(find.text('Show Results'));
+
     await tester.pumpAndSettle();
 
     expect(find.text('2 rooms found'), findsOneWidget);
 
     await tester.tap(find.text('More Filters'));
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.widgetWithText(OutlinedButton, 'Reset'));
+
     await tester.pump();
+
     await tester.tap(find.text('Show Results'));
+
     await tester.pumpAndSettle();
 
     expect(find.text('8 rooms found'), findsOneWidget);
   });
 
-  testWidgets('Search result opens the room detail screen', (
+  testWithApi('Search result opens the room detail screen', (
     WidgetTester tester,
   ) async {
     await pumpSearchScreen(tester);
 
     await tester.tap(find.text('Cozy Studio near RSU'));
+
     await tester.pumpAndSettle();
 
     expect(find.byType(RoomDetailScreen), findsOneWidget);
+
     expect(find.text('Description'), findsOneWidget);
+
     expect(find.text('Facilities'), findsOneWidget);
+
+    expect(find.text('Property Manager'), findsOneWidget);
   });
 
-  testWidgets('Home property card opens the room detail screen', (
+  testWithApi('Home property card opens the room detail screen', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
       MaterialApp(theme: AppTheme.lightTheme, home: const MainScreen()),
     );
 
-    await tester.ensureVisible(find.text('Cozy Studio near RSU'));
     await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Cozy Studio near RSU'));
+
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('Cozy Studio near RSU'));
+
     await tester.pumpAndSettle();
 
     expect(find.byType(RoomDetailScreen), findsOneWidget);
+
     expect(find.text('Description'), findsOneWidget);
+
+    expect(find.text('Property Manager'), findsOneWidget);
   });
 
-  testWidgets('Room detail toggles favorite and shows core sections', (
+  testWithApi('Room detail toggles favorite and shows core sections', (
     WidgetTester tester,
   ) async {
     await pumpRoomDetail(tester);
 
     expect(find.text('Cozy Studio near RSU'), findsOneWidget);
+
     expect(find.text('฿6,500 / month'), findsOneWidget);
+
     expect(find.text('Available'), findsOneWidget);
+
     expect(find.text('Description'), findsOneWidget);
+
     expect(find.text('Facilities'), findsOneWidget);
-    expect(find.text('House Rules'), findsOneWidget);
-    expect(find.text('Property Partner'), findsOneWidget);
-    expect(find.text('Reviews'), findsOneWidget);
+
+    expect(find.text('Property Manager'), findsOneWidget);
+
+    expect(find.text('House Rules'), findsNothing);
+
+    expect(find.text('Property Partner'), findsNothing);
+
+    expect(find.text('Reviews'), findsNothing);
 
     expect(find.byIcon(Icons.favorite_border), findsNWidgets(2));
+
     await tester.tap(find.byIcon(Icons.favorite_border).first);
+
     await tester.pump();
+
     expect(find.byIcon(Icons.favorite), findsNWidgets(2));
   });
 
-  testWidgets('Unavailable property only keeps favorite and disables viewing', (
+  testWithApi('Unavailable property disables viewing', (
     WidgetTester tester,
   ) async {
     final unavailable = sampleProperties.firstWhere(
@@ -189,10 +247,11 @@ void main() {
         home: RoomDetailScreen(
           id: unavailable.id,
           isFavorite: false,
-          onFavoriteToggle: () {},
+          onFavoriteToggle: () async => true,
         ),
       ),
     );
+
     await tester.pumpAndSettle();
 
     expect(find.text('Currently unavailable'), findsOneWidget);
@@ -202,19 +261,22 @@ void main() {
     );
 
     expect(viewingButton.onPressed, isNull);
+
     expect(
       find.widgetWithText(ElevatedButton, 'Request Booking'),
       findsNothing,
     );
+
     expect(find.widgetWithText(OutlinedButton, 'Message'), findsNothing);
   });
 
-  testWidgets('Viewing form validates and submits successfully', (
+  testWithApi('Viewing form validates and submits successfully', (
     WidgetTester tester,
   ) async {
     await pumpRoomDetail(tester);
 
     await tester.tap(find.widgetWithText(ElevatedButton, 'Request Viewing'));
+
     await tester.pumpAndSettle();
 
     expect(find.text('Schedule a viewing'), findsOneWidget);
@@ -222,29 +284,43 @@ void main() {
     await tester.ensureVisible(
       find.widgetWithText(ElevatedButton, 'Submit Request'),
     );
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.widgetWithText(ElevatedButton, 'Submit Request'));
+
     await tester.pump();
 
     expect(find.text('Please select a date'), findsOneWidget);
+
     expect(find.text('Please select a time'), findsOneWidget);
 
     await tester.tap(find.byType(TextFormField).at(0));
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.text('OK'));
+
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(TextFormField).at(1));
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.text('OK'));
+
     await tester.pumpAndSettle();
 
     await tester.ensureVisible(
       find.widgetWithText(ElevatedButton, 'Submit Request'),
     );
+
     await tester.pumpAndSettle();
+
     await tester.tap(find.widgetWithText(ElevatedButton, 'Submit Request'));
+
     await tester.pump();
+
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(
@@ -253,39 +329,54 @@ void main() {
     );
 
     await tester.pump(const Duration(seconds: 5));
+
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Search and room detail render on a mobile viewport', (
+  testWithApi('Search and room detail render on a mobile viewport', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(390, 844);
+
     tester.view.devicePixelRatio = 1.0;
+
     addTearDown(tester.view.resetPhysicalSize);
+
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await pumpSearchScreen(tester);
+
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('More Filters'));
+
     await tester.pumpAndSettle();
+
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('Show Results'));
+
     await tester.pumpAndSettle();
+
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('Cozy Studio near RSU'));
+
     await tester.pumpAndSettle();
+
     expect(tester.takeException(), isNull);
 
     await tester.drag(
       find.byType(SingleChildScrollView),
       const Offset(0, -1600),
     );
+
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Reviews'), findsOneWidget);
+
+    expect(find.text('Property Manager'), findsOneWidget);
+
+    expect(find.text('Reviews'), findsNothing);
   });
 }

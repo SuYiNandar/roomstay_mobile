@@ -18,6 +18,35 @@ class PropertyCard extends StatelessWidget {
   final VoidCallback onFavoritePressed;
   final VoidCallback? onTap;
 
+  Widget _buildImage() {
+    if (property.image.isEmpty) {
+      return _buildImagePlaceholder();
+    }
+
+    return Image.network(
+      property.image,
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: 140,
+      errorBuilder: (context, error, stackTrace) {
+        return _buildImagePlaceholder();
+      },
+    );
+  }
+
+  Widget _buildImagePlaceholder() {
+    return Container(
+      color: AppColors.photoBackground,
+      child: const Center(
+        child: Icon(
+          Icons.image_outlined,
+          size: 40,
+          color: AppColors.roofLavender,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -47,37 +76,36 @@ class PropertyCard extends StatelessWidget {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: Container(
+                    child: SizedBox(
                       width: double.infinity,
                       height: 140,
-                      color: AppColors.photoBackground,
-                      child: const Center(
-                        child: Icon(
-                          Icons.image_outlined,
-                          size: 40,
-                          color: AppColors.roofLavender,
-                        ),
-                      ),
+                      child: _buildImage(),
                     ),
                   ),
                   Positioned(
                     top: 8,
                     left: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        property.type,
-                        style: AppTextStyles.small.copyWith(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.tagline,
+                    right: 64,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          property.type,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.small.copyWith(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.tagline,
+                          ),
                         ),
                       ),
                     ),
@@ -85,22 +113,30 @@ class PropertyCard extends StatelessWidget {
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: Material(
-                      color: AppColors.surface,
-                      shape: const CircleBorder(),
-                      elevation: 1,
-                      child: InkWell(
-                        onTap: onFavoritePressed,
-                        customBorder: const CircleBorder(),
-                        child: SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: Icon(
-                            isFavorite ? Icons.favorite : Icons.favorite_border,
-                            color: isFavorite
-                                ? AppColors.accent
-                                : AppColors.textSecondary,
-                            size: 20,
+                    child: Tooltip(
+                      message: isFavorite
+                          ? 'Remove from favorites'
+                          : 'Save to favorites',
+                      child: Material(
+                        color: AppColors.surface,
+                        shape: const CircleBorder(),
+                        elevation: 1,
+                        child: InkWell(
+                          onTap: onFavoritePressed,
+                          customBorder: const CircleBorder(),
+                          child: SizedBox(
+                            key: const Key('favorite-property-button'),
+                            width: 48,
+                            height: 48,
+                            child: Icon(
+                              isFavorite
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              color: isFavorite
+                                  ? AppColors.accent
+                                  : AppColors.textSecondary,
+                              size: 22,
+                            ),
                           ),
                         ),
                       ),
@@ -143,6 +179,8 @@ class PropertyCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       property.priceLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontFamily: AppTextStyles.fontFamily,
                         fontSize: 19,
@@ -151,18 +189,36 @@ class PropertyCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const Icon(
-                    Icons.star_rounded,
-                    size: 16,
-                    color: AppColors.warning,
-                  ),
-                  const SizedBox(width: 2),
-                  Text(
-                    property.rating.toStringAsFixed(1),
-                    style: AppTextStyles.small.copyWith(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
+                  if (property.rating > 0) ...[
+                    const Icon(
+                      Icons.star_rounded,
+                      size: 16,
+                      color: AppColors.warning,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      property.rating.toStringAsFixed(1),
+                      style: AppTextStyles.small.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Flexible(
+                    child: Text(
+                      property.available ? 'Available' : 'Unavailable',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: AppTextStyles.small.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: property.available
+                            ? AppColors.success
+                            : AppColors.warning,
+                      ),
                     ),
                   ),
                 ],

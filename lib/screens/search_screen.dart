@@ -1,6 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
-import '../data/sample_properties.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../config/supabase_config.dart';
 import '../models/property.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
@@ -9,12 +12,14 @@ import '../widgets/property_card.dart';
 class SearchScreen extends StatefulWidget {
   const SearchScreen({
     super.key,
+    this.initialQuickFilter,
     required this.favoriteIds,
     required this.onFavoriteToggle,
     required this.onPropertySelected,
   });
 
-  final List<int> favoriteIds;
+  final String? initialQuickFilter;
+  final Set<int> favoriteIds;
   final void Function(int propertyId) onFavoriteToggle;
   final void Function(int propertyId) onPropertySelected;
 
@@ -30,7 +35,7 @@ class _SearchScreenState extends State<SearchScreen> {
     'Dormitory',
     'Pet friendly',
     'Near University',
-    'Near BTS/MRT',
+    'Near Transit',
   ];
 
   static const _quickTypeOptions = {'Apartment', 'Condo', 'House', 'Dormitory'};
@@ -43,6 +48,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
   final _searchController = TextEditingController();
 
+  List<Property> _properties = [];
+  bool _isLoading = true;
+  String _errorMessage = '';
+
   final Set<String> _quickFilters = {};
   String _sortOption = 'Default';
 
@@ -54,9 +63,63 @@ class _SearchScreenState extends State<SearchScreen> {
   Set<String> _facilities = {};
 
   @override
+  void initState() {
+    super.initState();
+    final initialFilter = widget.initialQuickFilter;
+    if (initialFilter != null && _quickFilterOptions.contains(initialFilter)) {
+      _quickFilters.add(initialFilter);
+    }
+    _fetchProperties();
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchProperties() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('$supabaseUrl/rest/v1/properties?select=*&order=id.asc'),
+        headers: {'apikey': supabasePublishableKey},
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is! List) {
+          throw const FormatException('Expected properties list');
+        }
+        final properties = <Property>[];
+        for (final row in data) {
+          properties.add(
+            Property.fromSupabase(Map<String, dynamic>.from(row as Map)),
+          );
+        }
+        setState(() {
+          _properties = properties;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Unable to load properties.';
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Unable to load properties.';
+      });
+    }
   }
 
   void _clearSearch() {
@@ -80,68 +143,83 @@ class _SearchScreenState extends State<SearchScreen> {
 
   List<Property> _filteredProperties() {
     final query = _searchController.text.trim().toLowerCase();
+    final results = <Property>[];
 
-    final results = sampleProperties.where((property) {
+    final selectedTypes = <String>{};
+    for (final filter in _quickFilters) {
+      if (_quickTypeOptions.contains(filter)) selectedTypes.add(filter);
+    }
+
+    for (final property in _properties) {
+      final name = property.name;
+      final location = property.location;
+      final type = property.type;
+      final normalizedType = type.trim().toLowerCase();
+
       final matchesKeyword =
           query.isEmpty ||
-          property.name.toLowerCase().contains(query) ||
-          property.location.toLowerCase().contains(query) ||
-          property.type.toLowerCase().contains(query);
+          name.toLowerCase().contains(query) ||
+          location.toLowerCase().contains(query) ||
+          type.toLowerCase().contains(query);
 
-      if (!matchesKeyword) return false;
+      if (!matchesKeyword) continue;
 
       if (_quickFilters.isNotEmpty) {
-        final selectedTypes = _quickFilters
-            .where(_quickTypeOptions.contains)
-            .toSet();
-
         if (selectedTypes.isNotEmpty &&
-            !selectedTypes.contains(property.type)) {
-          return false;
+            !selectedTypes.any(
+              (type) => type.toLowerCase() == normalizedType,
+            )) {
+          continue;
         }
         if (_quickFilters.contains('Pet friendly') && !property.petFriendly) {
-          return false;
+          continue;
         }
         if (_quickFilters.contains('Near University') &&
             !property.nearUniversity) {
-          return false;
+          continue;
         }
-        if (_quickFilters.contains('Near BTS/MRT') && !property.nearTransit) {
-          return false;
+        if (_quickFilters.contains('Near Transit') && !property.nearTransit) {
+          continue;
         }
       }
 
-      if (_propertyType != 'All' && property.type != _propertyType) {
-        return false;
-      }
-      if (_minRent != null && property.monthlyRent < _minRent!) {
-        return false;
-      }
-      if (_maxRent != null && property.monthlyRent > _maxRent!) {
-        return false;
+      if (_propertyType != 'All' &&
+          normalizedType != _propertyType.toLowerCase()) {
+        continue;
       }
 
-      switch (_bedrooms) {
-        case 'Studio':
-          if (property.bedrooms != 0) return false;
-        case '1':
-          if (property.bedrooms != 1) return false;
-        case '2':
-          if (property.bedrooms != 2) return false;
-        case '3+':
-          if (property.bedrooms < 3) return false;
+      final monthlyRent = property.monthlyRent;
+      if (_minRent != null && monthlyRent < _minRent!) {
+        continue;
       }
+      if (_maxRent != null && monthlyRent > _maxRent!) {
+        continue;
+      }
+
+      final bedrooms = property.bedrooms;
+      if (_bedrooms == 'Studio' && bedrooms != 0) continue;
+      if (_bedrooms == '1' && bedrooms != 1) continue;
+      if (_bedrooms == '2' && bedrooms != 2) continue;
+      if (_bedrooms == '3+' && bedrooms < 3) continue;
 
       if (_availableOnly && !property.available) {
-        return false;
-      }
-      if (_facilities.isNotEmpty &&
-          !_facilities.every(property.facilities.contains)) {
-        return false;
+        continue;
       }
 
-      return true;
-    }).toList();
+      if (_facilities.contains('Pet friendly') && !property.petFriendly) {
+        continue;
+      }
+
+      final requiredFacilities = _facilities.where(
+        (facility) => facility != 'Pet friendly',
+      );
+      final facilities = property.facilities;
+      if (!requiredFacilities.every(facilities.contains)) {
+        continue;
+      }
+
+      results.add(property);
+    }
 
     if (_sortOption == 'Price: Low to High') {
       results.sort((a, b) => a.monthlyRent.compareTo(b.monthlyRent));
@@ -188,14 +266,118 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  void _openRoomDetail(Property property) {
-    widget.onPropertySelected(property.id);
+  Widget _buildResultsArea() {
+    if (_isLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 32),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_errorMessage.isNotEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          children: [
+            Text(
+              _errorMessage,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.secondaryBody,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton(
+              onPressed: _fetchProperties,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final results = _filteredProperties();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                results.length == 1
+                    ? '1 room found'
+                    : '${results.length} rooms found',
+                style: AppTextStyles.body.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.brandText,
+                ),
+              ),
+            ),
+            TextButton(onPressed: _resetAllFilters, child: const Text('Reset')),
+          ],
+        ),
+        const SizedBox(height: 4),
+        if (results.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              children: [
+                const Icon(
+                  Icons.search_off,
+                  size: 40,
+                  color: AppColors.roofLavender,
+                ),
+                const SizedBox(height: 12),
+                const Text('No rooms found', style: AppTextStyles.sectionTitle),
+                const SizedBox(height: 6),
+                const Text(
+                  'Try changing your search or filters.',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.secondaryBody,
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: _resetAllFilters,
+                  child: const Text('Reset Filters'),
+                ),
+              ],
+            ),
+          )
+        else
+          for (var index = 0; index < results.length; index++) ...[
+            if (index > 0) const SizedBox(height: 12),
+            PropertyCard(
+              property: results[index],
+              isFavorite: widget.favoriteIds.contains(results[index].id),
+              onFavoritePressed: () {
+                widget.onFavoriteToggle(results[index].id);
+              },
+              onTap: () => widget.onPropertySelected(results[index].id),
+            ),
+          ],
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final results = _filteredProperties();
-
+    // Keep the Home shortcut visible even on a narrow horizontal chip row.
+    final quickFilterOptions = [
+      if (_quickFilterOptions.contains(widget.initialQuickFilter))
+        widget.initialQuickFilter!,
+      ..._quickFilterOptions.where(
+        (filter) => filter != widget.initialQuickFilter,
+      ),
+    ];
     return Scaffold(
       appBar: AppBar(title: const Text('Search')),
       body: SingleChildScrollView(
@@ -248,7 +430,7 @@ class _SearchScreenState extends State<SearchScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  for (final filter in _quickFilterOptions)
+                  for (final filter in quickFilterOptions)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: FilterChip(
@@ -288,53 +470,53 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.coolBorder),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _sortOption,
-                        isExpanded: true,
-                        icon: const Icon(
-                          Icons.keyboard_arrow_down,
-                          size: 20,
-                          color: AppColors.textSecondary,
-                        ),
-                        style: AppTextStyles.body.copyWith(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        items: [
-                          for (final option in _sortOptions)
-                            DropdownMenuItem<String>(
-                              value: option,
-                              child: Text(
-                                option,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() {
-                            _sortOption = value;
-                          });
-                        },
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final stacked =
+                    constraints.maxWidth < 340 ||
+                    MediaQuery.textScalerOf(context).scale(14) > 20;
+                final sort = Container(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.coolBorder),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _sortOption,
+                      isExpanded: true,
+                      icon: const Icon(
+                        Icons.keyboard_arrow_down,
+                        size: 20,
+                        color: AppColors.textSecondary,
                       ),
+                      style: AppTextStyles.body.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      items: [
+                        for (final option in _sortOptions)
+                          DropdownMenuItem<String>(
+                            value: option,
+                            child: Text(
+                              option,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() {
+                          _sortOption = value;
+                        });
+                      },
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
+                );
+                final filters = OutlinedButton.icon(
                   onPressed: _openMoreFilters,
                   icon: const Icon(Icons.tune, size: 18),
                   label: const Text('More Filters'),
@@ -348,76 +530,24 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                     textStyle: AppTextStyles.button.copyWith(fontSize: 12),
                   ),
-                ),
-              ],
+                );
+                if (stacked) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [sort, const SizedBox(height: 10), filters],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: sort),
+                    const SizedBox(width: 10),
+                    filters,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    results.length == 1
-                        ? '1 room found'
-                        : '${results.length} rooms found',
-                    style: AppTextStyles.body.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.brandText,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: _resetAllFilters,
-                  child: const Text('Reset'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            if (results.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  children: [
-                    const Icon(
-                      Icons.search_off,
-                      size: 40,
-                      color: AppColors.roofLavender,
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'No rooms found',
-                      style: AppTextStyles.sectionTitle,
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Try changing your search or filters.',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.secondaryBody,
-                    ),
-                    const SizedBox(height: 16),
-                    OutlinedButton(
-                      onPressed: _resetAllFilters,
-                      child: const Text('Reset Filters'),
-                    ),
-                  ],
-                ),
-              )
-            else
-              for (var index = 0; index < results.length; index++) ...[
-                if (index > 0) const SizedBox(height: 12),
-                PropertyCard(
-                  property: results[index],
-                  isFavorite: widget.favoriteIds.contains(results[index].id),
-                  onFavoritePressed: () {
-                    widget.onFavoriteToggle(results[index].id);
-                  },
-                  onTap: () => _openRoomDetail(results[index]),
-                ),
-              ],
+            _buildResultsArea(),
           ],
         ),
       ),
@@ -521,7 +651,11 @@ class _MoreFiltersSheetState extends State<_MoreFiltersSheet> {
     });
   }
 
+  bool get _invalidRentRange =>
+      _minRent != null && _maxRent != null && _minRent! > _maxRent!;
+
   void _apply() {
+    if (_invalidRentRange) return;
     Navigator.pop(
       context,
       _MoreFiltersResult(
@@ -661,6 +795,18 @@ class _MoreFiltersSheetState extends State<_MoreFiltersSheet> {
                   ],
                 ),
                 const SizedBox(height: 22),
+                if (_invalidRentRange) ...[
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      'Minimum rent cannot be greater than maximum rent.',
+                      style: AppTextStyles.secondaryBody.copyWith(
+                        color: AppColors.error,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 _sectionTitle('Bedrooms'),
                 Wrap(
                   spacing: 8,
@@ -742,9 +888,12 @@ class _MoreFiltersSheetState extends State<_MoreFiltersSheet> {
           ),
           child: SafeArea(
             top: false,
-            child: Row(
-              children: [
-                OutlinedButton(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final stacked =
+                    constraints.maxWidth < 320 ||
+                    MediaQuery.textScalerOf(context).scale(14) > 18;
+                final reset = OutlinedButton(
                   onPressed: _reset,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
@@ -755,15 +904,26 @@ class _MoreFiltersSheetState extends State<_MoreFiltersSheet> {
                     ),
                   ),
                   child: const Text('Reset'),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _apply,
-                    child: const Text('Show Results'),
-                  ),
-                ),
-              ],
+                );
+                final apply = ElevatedButton(
+                  onPressed: _invalidRentRange ? null : _apply,
+                  child: const Text('Show Results'),
+                );
+                if (stacked) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [reset, const SizedBox(height: 8), apply],
+                  );
+                }
+                return Row(
+                  children: [
+                    reset,
+                    const SizedBox(width: 12),
+                    Expanded(child: apply),
+                  ],
+                );
+              },
             ),
           ),
         ),

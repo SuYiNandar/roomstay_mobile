@@ -1,4 +1,4 @@
-import '../models/property.dart';
+import 'package:roomstay_mobile/models/property.dart';
 
 const sampleProperties = <Property>[
   Property(
@@ -216,4 +216,27 @@ const sampleProperties = <Property>[
     image: '',
     rating: 4.3,
   ),
+];
+
+final List<Map<String, dynamic>> samplePropertyMaps = [
+  for (final property in sampleProperties)
+    {
+      'id': property.id,
+      'partner_id': property.partnerId,
+      'name': property.name,
+      'location': property.location,
+      'type': property.type,
+      'monthly_rent': property.monthlyRent,
+      'bedrooms': property.bedrooms,
+      'available': property.available,
+      'pet_friendly': property.petFriendly,
+      'near_university': property.nearUniversity,
+      'near_transit': property.nearTransit,
+      'facilities': property.facilities,
+      'description': property.description,
+      'image_url': property.image,
+      'bathrooms': property.bathrooms,
+      'size_sqm': property.sizeSqm,
+      'rating': property.rating,
+    },
 ];

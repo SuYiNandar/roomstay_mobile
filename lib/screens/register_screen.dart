@@ -1,5 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../config/supabase_config.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/roomstay_logo.dart';
@@ -22,6 +26,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscureConfirmPassword = true;
   bool _agreedToTerms = false;
   bool _showTermsError = false;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -59,8 +64,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (password.isEmpty) {
       return 'Password is required';
     }
-    if (password.length < 6) {
-      return 'Password must be at least 6 characters';
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(password)) {
+      return 'Password must include an uppercase letter';
+    }
+    if (!RegExp(r'[a-z]').hasMatch(password)) {
+      return 'Password must include a lowercase letter';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(password)) {
+      return 'Password must include a number';
     }
     return null;
   }
@@ -84,7 +98,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
   }
 
-  void _register() {
+  Future<void> _register() async {
+    if (_isLoading) return;
     setState(() {
       _showTermsError = false;
     });
@@ -100,7 +115,106 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    setState(() {
+      _isLoading = true;
+    });
+
+    if (!isSupabaseConfigured) {
+      _finishRegistrationError(
+        'Supabase is not configured. Add your project URL and publishable key.',
+      );
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$supabaseUrl/auth/v1/signup'),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'email': _emailController.text.trim(),
+          'password': _passwordController.text,
+          'data': {'full_name': _fullNameController.text.trim()},
+        }),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        final requiresEmailConfirmation =
+            data is Map &&
+            data['access_token'] == null &&
+            data['session'] == null;
+
+        if (requiresEmailConfirmation) {
+          _finishRegistration(
+            'Account created. Please check your email to confirm your account.',
+          );
+        } else {
+          _finishRegistration('Account created successfully.');
+        }
+      } else {
+        _finishRegistrationError(
+          _readAuthError(
+            response.body,
+            'Unable to create your account. Please try again.',
+          ),
+        );
+      }
+    } catch (error) {
+      _finishRegistrationError('Unable to connect. Please check your network.');
+    }
+  }
+
+  void _finishRegistration(String message) {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+
     Navigator.pop(context);
+  }
+
+  void _finishRegistrationError(String message) {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _readAuthError(String body, String fallback) {
+    try {
+      final data = jsonDecode(body);
+
+      if (data is Map) {
+        final message =
+            data['error_description'] ??
+            data['msg'] ??
+            data['message'] ??
+            data['error'];
+
+        if (message != null && message.toString().trim().isNotEmpty) {
+          return message.toString();
+        }
+      }
+    } catch (error) {
+      return fallback;
+    }
+
+    return fallback;
   }
 
   @override
@@ -116,10 +230,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               children: [
                 const RoomStayLogo(compact: true),
                 const SizedBox(height: 32),
-                const Text('Create Account', style: AppTextStyles.h1),
+                const Text('Create your account', style: AppTextStyles.h1),
                 const SizedBox(height: 8),
                 const Text(
-                  'Join RoomStay and find your ideal room.',
+                  'Sign up to find your next home and manage your rental journey.',
                   style: AppTextStyles.secondaryBody,
                 ),
                 const SizedBox(height: 24),
@@ -172,6 +286,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   validator: _validatePassword,
                 ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Minimum 8 characters\n'
+                  'At least 1 uppercase letter\n'
+                  'At least 1 lowercase letter\n'
+                  'At least 1 number',
+                  style: AppTextStyles.small,
+                ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _confirmPasswordController,
@@ -211,7 +333,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: GestureDetector(
                         onTap: _toggleTerms,
                         child: const Text(
-                          'I agree to the Terms and Conditions',
+                          'I agree to the Terms of Service and Privacy Policy.',
                           style: AppTextStyles.secondaryBody,
                         ),
                       ),
@@ -222,7 +344,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const Padding(
                     padding: EdgeInsets.only(left: 12, top: 4),
                     child: Text(
-                      'Please accept the Terms and Conditions.',
+                      'Please accept the Terms of Service and Privacy Policy.',
                       style: TextStyle(
                         fontFamily: AppTextStyles.fontFamily,
                         fontSize: 12,
@@ -234,8 +356,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _register,
-                    child: const Text('Create Account'),
+                    onPressed: _isLoading ? null : _register,
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Sign Up'),
                   ),
                 ),
                 const SizedBox(height: 24),

@@ -3,16 +3,18 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-import '../data/api_config.dart';
-import '../data/demo_viewings.dart';
+import '../config/supabase_config.dart';
+import '../data/user_session.dart';
+import '../data/viewing_helpers.dart';
 import '../models/property.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/property_summary_card.dart';
 
 class RequestViewingScreen extends StatefulWidget {
-  const RequestViewingScreen({super.key, required this.property});
+  const RequestViewingScreen({super.key, required this.property, this.now});
 
   final Property property;
+  final DateTime Function()? now;
 
   @override
   State<RequestViewingScreen> createState() => _RequestViewingScreenState();
@@ -28,6 +30,8 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
   TimeOfDay? _selectedTime;
   bool _isSubmitting = false;
 
+  DateTime _currentTime() => widget.now?.call() ?? DateTime.now();
+
   @override
   void dispose() {
     _dateController.dispose();
@@ -37,27 +41,27 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
   }
 
   Future<void> _pickDate() async {
-    final now = DateTime.now();
+    final now = _currentTime();
+    final today = DateUtils.dateOnly(now);
     final selected = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? now.add(const Duration(days: 1)),
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
+      initialDate: _selectedDate ?? today.add(const Duration(days: 1)),
+      firstDate: today,
+      lastDate: today.add(const Duration(days: 365)),
     );
 
     if (selected == null || !mounted) return;
 
     setState(() {
       _selectedDate = selected;
-      _dateController.text =
-          '${selected.day.toString().padLeft(2, '0')}/${selected.month.toString().padLeft(2, '0')}/${selected.year}';
+      _dateController.text = displayViewingDate(supabaseDate(selected));
     });
   }
 
   Future<void> _pickTime() async {
     final selected = await showTimePicker(
       context: context,
-      initialTime: _selectedTime ?? TimeOfDay.now(),
+      initialTime: _selectedTime ?? TimeOfDay.fromDateTime(_currentTime()),
     );
 
     if (selected == null || !mounted) return;
@@ -69,55 +73,54 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
   }
 
   Future<void> _submit() async {
+    if (_isSubmitting) return;
     if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedDate == null || _selectedTime == null) return;
+
+    if (!isFutureViewingDateTime(
+      _selectedDate!,
+      _selectedTime!,
+      now: _currentTime(),
+    )) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(futureViewingTimeMessage)));
+      return;
+    }
+
+    final viewingDate = supabaseDate(_selectedDate!);
+    final viewingTime = supabaseTime(_selectedTime!);
+    final message = _messageController.text.trim();
+
+    if (UserSession.accessToken == null || UserSession.userId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please log in again.')));
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
     });
 
-    if (apiUrl == 'YOUR_API_URL') {
-      demoViewings.add({
-        'id': nextDemoViewingId,
-        'propertyId': widget.property.id,
-        'propertyName': widget.property.name,
-        'userId': 1,
-        'viewingDate': _dateController.text,
-        'viewingTime': _timeController.text,
-        'message': _messageController.text,
-        'status': 'Pending',
-      });
-      nextDemoViewingId++;
-
-      if (!mounted) return;
-      setState(() {
-        _isSubmitting = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Viewing request submitted successfully.'),
-        ),
-      );
-      Navigator.pop(context);
-      return;
-    }
-
     try {
-      final headers = {'Content-Type': 'application/json'};
-
-      final body = jsonEncode({
-        'propertyId': widget.property.id,
-        'propertyName': widget.property.name,
-        'userId': 1,
-        'viewingDate': _dateController.text,
-        'viewingTime': _timeController.text,
-        'message': _messageController.text,
-        'status': 'Pending',
-      });
-
       final res = await http.post(
-        Uri.parse('$apiUrl/viewings'),
-        headers: headers,
-        body: body,
+        Uri.parse('$supabaseUrl/rest/v1/viewings'),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Authorization': 'Bearer ${UserSession.accessToken}',
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: jsonEncode({
+          'property_id': widget.property.id,
+          'renter_id': UserSession.userId,
+          'viewing_date': viewingDate,
+          'viewing_time': viewingTime,
+          'message': message,
+          'status': 'Pending',
+        }),
       );
 
       if (!mounted) return;
@@ -131,7 +134,7 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
             content: Text('Viewing request submitted successfully.'),
           ),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       } else {
         setState(() {
           _isSubmitting = false;
@@ -165,7 +168,7 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
               const Text('Schedule a viewing', style: AppTextStyles.h2),
               const SizedBox(height: 6),
               const Text(
-                'Choose a preferred date and time. The partner will confirm the viewing later.',
+                'Choose a preferred date and time. The property manager will confirm the viewing later.',
                 style: AppTextStyles.secondaryBody,
               ),
               const SizedBox(height: 20),
@@ -214,7 +217,7 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(
                   labelText: 'Message (optional)',
-                  hintText: 'Share anything the partner should know',
+                  hintText: 'Share anything the property manager should know',
                   alignLabelWithHint: true,
                 ),
               ),
@@ -225,7 +228,10 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Text('Submit Request'),
               ),

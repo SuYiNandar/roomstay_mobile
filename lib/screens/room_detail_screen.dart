@@ -1,6 +1,11 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
-import '../data/sample_properties.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+
+import '../config/supabase_config.dart';
+import '../data/user_session.dart';
 import '../models/property.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
@@ -16,50 +21,353 @@ class RoomDetailScreen extends StatefulWidget {
 
   final int id;
   final bool isFavorite;
-  final VoidCallback onFavoriteToggle;
+  final Future<bool> Function() onFavoriteToggle;
 
   @override
   State<RoomDetailScreen> createState() => _RoomDetailScreenState();
 }
 
 class _RoomDetailScreenState extends State<RoomDetailScreen> {
-  late Property _property;
-  late bool _isFavorite;
-  int _currentImage = 0;
+  Property? _propertyDetail;
 
-  static const _houseRules = [
-    'No smoking',
-    'No parties',
-    'Pets according to property rules',
-  ];
+  bool _isLoading = true;
+  String _errorMessage = '';
+
+  late bool _isFavorite;
+  bool _isSavingFavorite = false;
+
+  String _managerName = 'RoomStay Manager';
+  String _managerEmail = '';
+  bool _isManagerLoading = false;
+  String _managerError = '';
+
+  Property get _property => _propertyDetail!;
 
   @override
   void initState() {
     super.initState();
-    _property = sampleProperties.firstWhere(
-      (property) => property.id == widget.id,
-    );
+
     _isFavorite = widget.isFavorite;
+
+    _fetchProperty();
   }
 
-  void _toggleFavorite() {
-    widget.onFavoriteToggle();
+  Future<void> _fetchProperty() async {
     setState(() {
-      _isFavorite = !_isFavorite;
+      _isLoading = true;
+      _errorMessage = '';
+
+      _managerName = 'RoomStay Manager';
+      _managerEmail = '';
+      _managerError = '';
     });
+
+    try {
+      final response = await http.get(
+        Uri.parse(
+          '$supabaseUrl/rest/v1/properties'
+          '?id=eq.${widget.id}&select=*',
+        ),
+        headers: {'apikey': supabasePublishableKey},
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        if (data is List && data.isNotEmpty) {
+          final propertyData = Map<String, dynamic>.from(data[0] as Map);
+
+          final property = Property.fromSupabase(propertyData);
+
+          setState(() {
+            _propertyDetail = property;
+            _isLoading = false;
+          });
+
+          if (property.partnerId.isNotEmpty) {
+            await _fetchPropertyManager(property.partnerId);
+          } else {
+            if (!mounted) return;
+
+            setState(() {
+              _managerError = 'Property manager information is not available.';
+            });
+          }
+        } else {
+          setState(() {
+            _propertyDetail = null;
+            _isLoading = false;
+            _errorMessage = 'Property not found.';
+          });
+        }
+      } else {
+        setState(() {
+          _propertyDetail = null;
+          _isLoading = false;
+          _errorMessage = 'Unable to load property.';
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _propertyDetail = null;
+        _isLoading = false;
+        _errorMessage = 'Unable to load property.';
+      });
+    }
+  }
+
+  Future<void> _fetchPropertyManager(String managerId) async {
+    if (!mounted) return;
+
+    setState(() {
+      _isManagerLoading = true;
+      _managerError = '';
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse(
+          '$supabaseUrl/rest/v1/profiles'
+          '?id=eq.$managerId'
+          '&select=full_name,email,role',
+        ),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Authorization': 'Bearer ${UserSession.accessToken}',
+        },
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        if (data is List && data.isNotEmpty) {
+          final manager = Map<String, dynamic>.from(data[0] as Map);
+
+          setState(() {
+            _managerName =
+                manager['full_name']?.toString() ?? 'RoomStay Manager';
+
+            _managerEmail = manager['email']?.toString() ?? '';
+
+            _isManagerLoading = false;
+          });
+
+          return;
+        }
+      }
+
+      setState(() {
+        _managerError = 'Contact information is not available.';
+        _isManagerLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _managerError = 'Contact information is not available.';
+        _isManagerLoading = false;
+      });
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    if (_isSavingFavorite) return;
+
+    _isSavingFavorite = true;
+
+    try {
+      final success = await widget.onFavoriteToggle();
+
+      if (!mounted || !success) return;
+
+      setState(() {
+        _isFavorite = !_isFavorite;
+      });
+    } finally {
+      _isSavingFavorite = false;
+    }
   }
 
   void _openViewingRequest() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => RequestViewingScreen(property: _property),
+        builder: (context) {
+          return RequestViewingScreen(property: _property);
+        },
       ),
+    );
+  }
+
+  void _showContactManager() {
+    if (_managerEmail.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Property manager contact information is not available.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 8, 22, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Contact Property Manager',
+                  style: AppTextStyles.sectionTitle,
+                ),
+
+                const SizedBox(height: 8),
+
+                Text(
+                  'Have a question about this property? '
+                  'Contact the property manager for more information.',
+                  style: AppTextStyles.secondaryBody,
+                ),
+
+                const SizedBox(height: 20),
+
+                Row(
+                  children: [
+                    const Icon(Icons.person_outline, color: AppColors.primary),
+
+                    const SizedBox(width: 10),
+
+                    Expanded(
+                      child: Text(
+                        _managerName,
+                        style: const TextStyle(
+                          fontFamily: AppTextStyles.fontFamily,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.brandText,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 14),
+
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.email_outlined, color: AppColors.primary),
+
+                    const SizedBox(width: 10),
+
+                    Expanded(
+                      child: Text(
+                        _managerEmail,
+                        style: AppTextStyles.secondaryBody,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+
+                      try {
+                        await Clipboard.setData(
+                          ClipboardData(text: _managerEmail),
+                        );
+                      } catch (_) {
+                        if (!sheetContext.mounted) return;
+                        Navigator.pop(sheetContext);
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Unable to copy email. Please try again.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (!sheetContext.mounted) {
+                        return;
+                      }
+
+                      Navigator.pop(sheetContext);
+
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text('Email copied to clipboard.'),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_outlined),
+                    label: const Text('Copy Email'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Room Details')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_propertyDetail == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Room Details')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.secondaryBody,
+                ),
+
+                const SizedBox(height: 16),
+
+                OutlinedButton(
+                  onPressed: _fetchProperty,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     final property = _property;
 
     return Scaffold(
@@ -69,82 +377,78 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildGallery(context),
+
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 20, 22, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildHeader(),
+
                   const SizedBox(height: 20),
+
                   _buildOverview(),
+
                   const SizedBox(height: 24),
+
                   const Text('Description', style: AppTextStyles.sectionTitle),
+
                   const SizedBox(height: 10),
+
                   Text(
-                    property.description,
+                    property.description.isEmpty
+                        ? 'No description provided.'
+                        : property.description,
                     style: AppTextStyles.secondaryBody.copyWith(height: 1.5),
                   ),
+
                   const SizedBox(height: 24),
+
                   const Text('Facilities', style: AppTextStyles.sectionTitle),
+
                   const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final facility in property.facilities)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryTint,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            facility,
-                            style: AppTextStyles.small.copyWith(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w500,
+
+                  if (property.facilities.isEmpty)
+                    const Text(
+                      'No facilities listed.',
+                      style: AppTextStyles.secondaryBody,
+                    )
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final facility in property.facilities)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 7,
                             ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  const Text('House Rules', style: AppTextStyles.sectionTitle),
-                  const SizedBox(height: 10),
-                  for (final rule in _houseRules)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.check_circle_outline,
-                            size: 16,
-                            color: AppColors.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryTint,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
                             child: Text(
-                              rule,
-                              style: AppTextStyles.secondaryBody,
+                              facility,
+                              style: AppTextStyles.small.copyWith(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
+
                   const SizedBox(height: 24),
+
                   const Text(
-                    'Property Partner',
+                    'Property Manager',
                     style: AppTextStyles.sectionTitle,
                   ),
+
                   const SizedBox(height: 10),
-                  _buildPartnerCard(),
-                  const SizedBox(height: 24),
-                  const Text('Reviews', style: AppTextStyles.sectionTitle),
-                  const SizedBox(height: 10),
-                  _buildReviewsCard(),
+
+                  _buildManagerCard(),
                 ],
               ),
             ),
@@ -155,32 +459,24 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   }
 
   Widget _buildGallery(BuildContext context) {
+    final imageUrl = _property.image;
+
     return SizedBox(
       height: 290,
       child: Stack(
         children: [
           Positioned.fill(
-            child: PageView.builder(
-              itemCount: 1,
-              onPageChanged: (index) {
-                setState(() {
-                  _currentImage = index;
-                });
-              },
-              itemBuilder: (context, index) {
-                return Container(
-                  color: AppColors.photoBackground,
-                  child: const Center(
-                    child: Icon(
-                      Icons.image_outlined,
-                      size: 56,
-                      color: AppColors.roofLavender,
-                    ),
+            child: imageUrl.isEmpty
+                ? _buildImagePlaceholder()
+                : Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return _buildImagePlaceholder();
+                    },
                   ),
-                );
-              },
-            ),
           ),
+
           Positioned(
             top: MediaQuery.paddingOf(context).top + 8,
             left: 16,
@@ -190,9 +486,13 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                 _circleButton(
                   icon: Icons.arrow_back,
                   tooltip: 'Back',
-                  onTap: () => Navigator.pop(context),
+                  onTap: () {
+                    Navigator.pop(context);
+                  },
                 ),
+
                 const Spacer(),
+
                 _circleButton(
                   icon: _isFavorite ? Icons.favorite : Icons.favorite_border,
                   iconColor: _isFavorite
@@ -206,25 +506,43 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               ],
             ),
           ),
-          Positioned(
-            right: 16,
-            bottom: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '${_currentImage + 1} / 1',
-                style: AppTextStyles.small.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.brandText,
+
+          if (_property.image.isNotEmpty)
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '1 / 1',
+                  style: AppTextStyles.small.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.brandText,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildImagePlaceholder() {
+    return Container(
+      color: AppColors.photoBackground,
+      child: const Center(
+        child: Icon(
+          Icons.image_outlined,
+          size: 56,
+          color: AppColors.roofLavender,
+        ),
       ),
     );
   }
@@ -245,8 +563,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
           onTap: onTap,
           customBorder: const CircleBorder(),
           child: SizedBox(
-            width: 44,
-            height: 44,
+            width: 48,
+            height: 48,
             child: Icon(icon, color: iconColor),
           ),
         ),
@@ -256,9 +574,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
 
   Widget _buildHeader() {
     final property = _property;
+
     final statusColor = property.available
         ? AppColors.success
         : AppColors.warning;
+
     final statusBackground = property.available
         ? AppColors.successBackground
         : AppColors.warningBackground;
@@ -276,7 +596,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
             height: 1.2,
           ),
         ),
+
         const SizedBox(height: 8),
+
         Row(
           children: [
             const Icon(
@@ -284,7 +606,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               size: 18,
               color: AppColors.textSecondary,
             ),
+
             const SizedBox(width: 4),
+
             Expanded(
               child: Text(
                 property.location,
@@ -293,7 +617,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
             ),
           ],
         ),
+
         const SizedBox(height: 12),
+
         Text(
           property.priceLabel,
           style: const TextStyle(
@@ -303,8 +629,13 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
             color: AppColors.deepIndigo,
           ),
         ),
+
         const SizedBox(height: 10),
-        Row(
+
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 6,
           children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -320,9 +651,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                 ),
               ),
             ),
-            const Spacer(),
+
             TextButton.icon(
-              onPressed: _toggleFavorite,
+              onPressed: _isSavingFavorite ? null : _toggleFavorite,
               icon: Icon(
                 _isFavorite ? Icons.favorite : Icons.favorite_border,
                 size: 18,
@@ -349,34 +680,38 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                 value: property.type,
               ),
             ),
+
             const SizedBox(width: 10),
+
             Expanded(
               child: _OverviewCard(
                 icon: Icons.king_bed_outlined,
                 label: 'Bedrooms',
-                value: property.bedrooms == 0
-                    ? 'Studio'
-                    : '${property.bedrooms}',
+                value: property.bedroomLabel,
               ),
             ),
           ],
         ),
+
         const SizedBox(height: 10),
+
         Row(
           children: [
             Expanded(
               child: _OverviewCard(
-                icon: Icons.bathtub_outlined,
-                label: 'Bathrooms',
-                value: '${property.bathrooms}',
+                icon: Icons.pets_outlined,
+                label: 'Pet friendly',
+                value: property.petFriendly ? 'Yes' : 'No',
               ),
             ),
+
             const SizedBox(width: 10),
+
             Expanded(
               child: _OverviewCard(
-                icon: Icons.square_foot,
-                label: 'Size',
-                value: '${property.sizeSqm} sqm',
+                icon: Icons.directions_subway_outlined,
+                label: 'Near transit',
+                value: property.nearTransit ? 'Yes' : 'No',
               ),
             ),
           ],
@@ -385,7 +720,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     );
   }
 
-  Widget _buildPartnerCard() {
+  Widget _buildManagerCard() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -393,110 +728,76 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: const BoxDecoration(
-              color: AppColors.primaryTint,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.business, color: AppColors.primary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: _isManagerLoading
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          : Row(
               children: [
-                const Text(
-                  'RoomStay Partner',
-                  style: TextStyle(
-                    fontFamily: AppTextStyles.fontFamily,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.brandText,
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryTint,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.business_outlined,
+                    color: AppColors.primary,
                   ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  'Member since 2025',
-                  style: AppTextStyles.small.copyWith(fontSize: 12),
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.star_rounded,
-                      size: 15,
-                      color: AppColors.warning,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      'Rating 4.8',
-                      style: AppTextStyles.small.copyWith(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.textPrimary,
+
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _managerName,
+                        style: const TextStyle(
+                          fontFamily: AppTextStyles.fontFamily,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.brandText,
+                        ),
                       ),
-                    ),
-                  ],
+
+                      const SizedBox(height: 4),
+
+                      Text(
+                        _managerEmail.isNotEmpty
+                            ? _managerEmail
+                            : _managerError.isNotEmpty
+                            ? _managerError
+                            : 'Contact information is not available.',
+                        style: AppTextStyles.small.copyWith(fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
+
+                if (_managerEmail.isNotEmpty)
+                  IconButton(
+                    onPressed: _showContactManager,
+                    tooltip: 'Contact Property Manager',
+                    icon: const Icon(
+                      Icons.email_outlined,
+                      color: AppColors.primary,
+                    ),
+                  ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReviewsCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
-                '4.8',
-                style: TextStyle(
-                  fontFamily: AppTextStyles.fontFamily,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.brandText,
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(
-                Icons.star_rounded,
-                size: 20,
-                color: AppColors.warning,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            '“Clean room and convenient location.”',
-            style: AppTextStyles.secondaryBody,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '“Good communication with the partner.”',
-            style: AppTextStyles.secondaryBody,
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildBottomActions() {
     final canRequest = _property.available;
+
+    final canContact = _managerEmail.isNotEmpty;
 
     return Container(
       decoration: const BoxDecoration(
@@ -507,12 +808,28 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(22, 10, 22, 10),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: canRequest ? _openViewingRequest : null,
-              child: const Text('Request Viewing'),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: canContact ? _showContactManager : null,
+                  icon: const Icon(Icons.email_outlined),
+                  label: const Text('Contact Property Manager'),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: canRequest ? _openViewingRequest : null,
+                  child: const Text('Request Viewing'),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -551,13 +868,17 @@ class _OverviewCard extends StatelessWidget {
             ),
             child: Icon(icon, size: 18, color: AppColors.primary),
           ),
+
           const SizedBox(width: 8),
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(label, style: AppTextStyles.small.copyWith(fontSize: 11)),
+
                 const SizedBox(height: 2),
+
                 Text(
                   value,
                   maxLines: 1,

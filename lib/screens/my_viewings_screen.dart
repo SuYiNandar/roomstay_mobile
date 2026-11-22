@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-import '../data/api_config.dart';
-import '../data/demo_viewings.dart';
+import '../config/supabase_config.dart';
+import '../data/user_session.dart';
+import '../data/viewing_helpers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import 'login_screen.dart';
 import 'update_viewing_screen.dart';
 
 class MyViewingsScreen extends StatefulWidget {
@@ -17,7 +19,8 @@ class MyViewingsScreen extends StatefulWidget {
 }
 
 class _MyViewingsScreenState extends State<MyViewingsScreen> {
-  List<dynamic> _viewings = [];
+  List<Map<String, dynamic>> _viewings = [];
+  final Set<String> _cancellingIds = {};
   bool _isLoading = true;
   String _errorMessage = '';
 
@@ -28,24 +31,46 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
   }
 
   Future<void> _fetchViewings() async {
-    if (apiUrl == 'YOUR_API_URL') {
+    if (UserSession.accessToken == null || UserSession.userId == null) {
       setState(() {
-        _viewings = List<Map<String, dynamic>>.from(demoViewings);
         _isLoading = false;
-        _errorMessage = '';
+        _errorMessage = 'Please log in again.';
       });
       return;
     }
 
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
     try {
-      final res = await http.get(Uri.parse('$apiUrl/viewings'));
+      final res = await http.get(
+        Uri.parse(
+          '$supabaseUrl/rest/v1/viewings'
+          '?renter_id=eq.${UserSession.userId}'
+          '&select=id,property_id,renter_id,viewing_date,viewing_time,message,status,created_at,properties(name,location,image_url)'
+          '&order=created_at.desc',
+        ),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Authorization': 'Bearer ${UserSession.accessToken}',
+        },
+      );
 
       if (!mounted) return;
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        if (data is! List) {
+          throw const FormatException('Expected viewings list');
+        }
+        final viewings = <Map<String, dynamic>>[];
+        for (final row in data) {
+          viewings.add(Map<String, dynamic>.from(row as Map));
+        }
         setState(() {
-          _viewings = data is List ? data : [];
+          _viewings = viewings;
           _isLoading = false;
           _errorMessage = '';
         });
@@ -64,40 +89,97 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
     }
   }
 
-  Future<void> _openUpdateViewing(int id) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => UpdateViewingScreen(id: id)),
-    );
-
-    await _fetchViewings();
-  }
-
-  Future<void> _deleteViewing(int id, int index) async {
-    if (apiUrl == 'YOUR_API_URL') {
-      demoViewings.removeWhere((viewing) => viewing['id'] == id);
-
-      setState(() {
-        _viewings.removeAt(index);
-      });
-
+  Future<void> _openUpdateViewing(Map<String, dynamic> viewing) async {
+    if (!isPendingViewingStatus(viewing['status'])) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Viewing cancelled successfully.')),
+        const SnackBar(content: Text(pendingViewingModificationMessage)),
       );
       return;
     }
 
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (context) => UpdateViewingScreen(id: viewing['id']),
+      ),
+    );
+
+    if (!mounted) return;
+    if (result == true) {
+      await _fetchViewings();
+    }
+  }
+
+  Future<void> _cancelViewing(Map<String, dynamic> viewing) async {
+    if (!isPendingViewingStatus(viewing['status'])) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(pendingViewingModificationMessage)),
+      );
+      return;
+    }
+
+    final id = viewing['id'];
+    if (_cancellingIds.contains(id.toString())) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Cancel viewing?'),
+          content: const Text('Are you sure you want to cancel this viewing?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('No'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Yes, Cancel'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    if (UserSession.accessToken == null || UserSession.userId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please log in again.')));
+      return;
+    }
+
+    _cancellingIds.add(id.toString());
     try {
-      final res = await http.delete(Uri.parse('$apiUrl/viewings/$id'));
+      final res = await http.delete(
+        Uri.parse(
+          '$supabaseUrl/rest/v1/viewings?id=eq.$id'
+          '&renter_id=eq.${UserSession.userId}'
+          '&status=eq.Pending',
+        ),
+        headers: {
+          'apikey': supabasePublishableKey,
+          'Authorization': 'Bearer ${UserSession.accessToken}',
+          'Prefer': 'return=representation',
+        },
+      );
 
       if (!mounted) return;
 
-      if (res.statusCode == 200 || res.statusCode == 204) {
+      final rows = res.statusCode == 200 ? jsonDecode(res.body) : null;
+      if (rows is List && rows.isNotEmpty) {
         setState(() {
-          _viewings.removeAt(index);
+          _viewings.removeWhere(
+            (item) => item['id'].toString() == id.toString(),
+          );
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Viewing cancelled successfully.')),
+        );
+      } else if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(pendingViewingModificationMessage)),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -109,7 +191,18 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to cancel viewing.')),
       );
+    } finally {
+      _cancellingIds.remove(id.toString());
     }
+  }
+
+  void _goToLogin() {
+    UserSession.clear();
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   @override
@@ -131,16 +224,22 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _isLoading = true;
-                          _errorMessage = '';
-                        });
-                        _fetchViewings();
-                      },
-                      child: const Text('Try Again'),
-                    ),
+                    if (_errorMessage == 'Please log in again.')
+                      ElevatedButton(
+                        onPressed: _goToLogin,
+                        child: const Text('Log In'),
+                      )
+                    else
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _isLoading = true;
+                            _errorMessage = '';
+                          });
+                          _fetchViewings();
+                        },
+                        child: const Text('Try Again'),
+                      ),
                   ],
                 ),
               ),
@@ -173,13 +272,13 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
                         ),
                         const SizedBox(height: 12),
                         const Text(
-                          'No viewing requests yet',
+                          'No viewing requests yet.',
                           style: AppTextStyles.sectionTitle,
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Open a room and request a viewing to get started.',
+                          'Choose a room and request a viewing.',
                           style: AppTextStyles.secondaryBody,
                           textAlign: TextAlign.center,
                         ),
@@ -195,10 +294,10 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
                   child: _ViewingCard(
                     viewing: viewing,
                     onEdit: () {
-                      _openUpdateViewing(viewing['id']);
+                      _openUpdateViewing(viewing);
                     },
                     onCancel: () {
-                      _deleteViewing(viewing['id'], index - 1);
+                      _cancelViewing(viewing);
                     },
                   ),
                 );
@@ -220,6 +319,9 @@ class _ViewingCard extends StatelessWidget {
   final VoidCallback onCancel;
 
   Color get _statusBackground {
+    if (viewing['status'] == 'Rejected') {
+      return AppColors.error.withValues(alpha: 0.1);
+    }
     if (viewing['status'] == 'Approved') {
       return AppColors.successBackground;
     }
@@ -230,6 +332,7 @@ class _ViewingCard extends StatelessWidget {
   }
 
   Color get _statusColor {
+    if (viewing['status'] == 'Rejected') return AppColors.error;
     if (viewing['status'] == 'Approved') {
       return AppColors.success;
     }
@@ -239,8 +342,36 @@ class _ViewingCard extends StatelessWidget {
     return AppColors.warning;
   }
 
+  Widget _buildImage() {
+    final imageUrl = viewingPropertyImage(viewing);
+
+    if (imageUrl.isEmpty) {
+      return const Center(
+        child: Icon(Icons.image_outlined, color: AppColors.roofLavender),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.network(
+        imageUrl,
+        width: 64,
+        height: 64,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return const Center(
+            child: Icon(Icons.image_outlined, color: AppColors.roofLavender),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final message = viewing['message']?.toString() ?? '';
+    final canModify = isPendingViewingStatus(viewing['status']);
+
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
@@ -263,10 +394,7 @@ class _ViewingCard extends StatelessWidget {
                     color: AppColors.photoBackground,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(
-                    Icons.image_outlined,
-                    color: AppColors.roofLavender,
-                  ),
+                  child: _buildImage(),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -274,7 +402,7 @@ class _ViewingCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        viewing['propertyName'] ?? '',
+                        viewingPropertyName(viewing),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -295,7 +423,7 @@ class _ViewingCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              '${viewing['viewingDate']} • ${viewing['viewingTime']}',
+                              '${displayViewingDate(viewing['viewing_date'])} • ${displayViewingTime(viewing['viewing_time'])}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: AppTextStyles.small.copyWith(fontSize: 12),
@@ -327,24 +455,40 @@ class _ViewingCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Edit'),
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.small.copyWith(fontSize: 12),
                 ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: onCancel,
-                  style: TextButton.styleFrom(foregroundColor: AppColors.error),
-                  icon: const Icon(Icons.cancel_outlined, size: 18),
-                  label: const Text('Cancel'),
-                ),
-              ],
-            ),
+              ),
+            ],
+            if (canModify) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 4,
+                children: [
+                  TextButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('Edit'),
+                  ),
+                  TextButton.icon(
+                    onPressed: onCancel,
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                    ),
+                    icon: const Icon(Icons.cancel_outlined, size: 18),
+                    label: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

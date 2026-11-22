@@ -1,11 +1,15 @@
+import 'support/test_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:roomstay_mobile/data/partner_demo_data.dart';
+import 'fixtures/partner_demo_data.dart';
+import 'package:roomstay_mobile/data/user_session.dart';
 import 'package:roomstay_mobile/screens/login_screen.dart';
-import 'package:roomstay_mobile/screens/partner/add_property_screen.dart';
-import 'package:roomstay_mobile/screens/partner/partner_main_screen.dart';
-import 'package:roomstay_mobile/screens/partner/update_property_screen.dart';
+import 'package:roomstay_mobile/screens/main_screen.dart';
+import 'package:roomstay_mobile/screens/property_manager_main_screen.dart';
+import 'support/legacy_partner/add_property_screen.dart';
+import 'support/legacy_partner/partner_main_screen.dart';
+import 'support/legacy_partner/update_property_screen.dart';
 import 'package:roomstay_mobile/theme/app_theme.dart';
 
 Future<void> pumpLogin(WidgetTester tester) async {
@@ -18,7 +22,7 @@ Future<void> pumpLogin(WidgetTester tester) async {
 Future<void> loginAsPartner(WidgetTester tester) async {
   await pumpLogin(tester);
 
-  await tester.tap(find.widgetWithText(ElevatedButton, 'Partner'));
+  await tester.tap(find.widgetWithText(ElevatedButton, 'Property Manager'));
   await tester.pump();
 
   await tester.enterText(
@@ -73,57 +77,54 @@ Future<void> fillPropertyForm(WidgetTester tester) async {
 }
 
 void main() {
-  setUp(resetPartnerDemoData);
-
-  testWidgets('Login shows only Renter and Partner and defaults to Renter', (
-    WidgetTester tester,
-  ) async {
-    await pumpLogin(tester);
-
-    expect(find.text('Renter'), findsOneWidget);
-    expect(find.text('Partner'), findsOneWidget);
-    expect(find.text('Admin'), findsNothing);
-
-    await tester.enterText(
-      find.byType(TextFormField).at(0),
-      'renter@example.com',
-    );
-    await tester.enterText(find.byType(TextFormField).at(1), 'password123');
-    await tester.tap(find.widgetWithText(ElevatedButton, 'Login'));
-    await tester.pumpAndSettle();
-
-    expect(find.byType(NavigationDestination), findsNWidgets(5));
-    expect(
-      find.descendant(
-        of: find.byType(NavigationBar),
-        matching: find.text('My Viewings'),
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Partner Dashboard'), findsNothing);
+  setUp(() {
+    resetPartnerDemoData();
+    UserSession.clear();
+    resetTestBackend();
   });
 
-  testWidgets('Partner login opens PartnerMainScreen with four tabs', (
+  testWithApi(
+    'Login shows Renter and Property Manager and defaults to Renter',
+    (WidgetTester tester) async {
+      await pumpLogin(tester);
+
+      expect(find.text('Renter'), findsOneWidget);
+      expect(find.text('Property Manager'), findsOneWidget);
+      expect(find.text('Admin'), findsNothing);
+
+      await tester.enterText(
+        find.byType(TextFormField).at(0),
+        'renter@example.com',
+      );
+      await tester.enterText(find.byType(TextFormField).at(1), 'password123');
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Login'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NavigationDestination), findsNWidgets(5));
+      expect(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('My Viewings'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Partner Dashboard'), findsNothing);
+    },
+  );
+
+  testWithApi('Legacy partner accounts open the Property Manager area', (
     WidgetTester tester,
   ) async {
     await loginAsPartner(tester);
 
-    expect(find.byType(PartnerMainScreen), findsOneWidget);
-    expect(find.text('Partner Dashboard'), findsOneWidget);
-    expect(find.byType(NavigationDestination), findsNWidgets(4));
-
-    for (final label in ['Dashboard', 'My Properties', 'Viewings', 'Profile']) {
-      expect(
-        find.descendant(
-          of: find.byType(NavigationBar),
-          matching: find.text(label),
-        ),
-        findsOneWidget,
-      );
-    }
+    expect(find.byType(PartnerMainScreen), findsNothing);
+    expect(find.byType(MainScreen), findsNothing);
+    expect(find.byType(PropertyManagerMainScreen), findsOneWidget);
+    expect(UserSession.role, 'partner');
+    expect(UserSession.accessToken, isNotNull);
   });
 
-  testWidgets('Partner dashboard shows summary cards and quick actions', (
+  testWithApi('Partner dashboard shows summary cards and quick actions', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -165,7 +166,7 @@ void main() {
     );
   });
 
-  testWidgets('My Properties lists local property records and actions', (
+  testWithApi('My Properties lists local property records and actions', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -182,7 +183,7 @@ void main() {
     expect(find.widgetWithText(TextButton, 'Delete'), findsNWidgets(4));
   });
 
-  testWidgets('Add Property validates required fields and numbers', (
+  testWithApi('Add Property validates required fields and numbers', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -218,7 +219,7 @@ void main() {
     expect(partnerProperties.length, 4);
   });
 
-  testWidgets('Add Property creates a local record and returns to the list', (
+  testWithApi('Add Property creates a local record and returns to the list', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -244,7 +245,7 @@ void main() {
     expect(addedProperty['available'], isTrue);
   });
 
-  testWidgets('Edit Property loads values and saves local changes', (
+  testWithApi('Edit Property loads values and saves local changes', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -275,7 +276,7 @@ void main() {
     expect(find.text('Cozy Studio near RSU'), findsNothing);
   });
 
-  testWidgets('Delete Property removes the record from My Properties', (
+  testWithApi('Delete Property removes the record from My Properties', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -292,7 +293,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Partner Viewings shows request details and statuses', (
+  testWithApi('Partner Viewings shows request details and statuses', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester, height: 3000);
@@ -316,7 +317,7 @@ void main() {
     expect(find.widgetWithText(ElevatedButton, 'Reject'), findsNWidgets(3));
   });
 
-  testWidgets('Partner approves a pending viewing request', (
+  testWithApi('Partner approves a pending viewing request', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -332,7 +333,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Partner rejects a pending viewing request', (
+  testWithApi('Partner rejects a pending viewing request', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -348,7 +349,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Partner Profile shows demo info, menu actions, and logout', (
+  testWithApi('Partner Profile shows demo info, menu actions, and logout', (
     WidgetTester tester,
   ) async {
     await pumpPartnerMain(tester);
@@ -388,11 +389,11 @@ void main() {
 
     expect(find.text('Welcome back'), findsOneWidget);
     expect(find.text('Renter'), findsOneWidget);
-    expect(find.text('Partner'), findsOneWidget);
+    expect(find.text('Property Manager'), findsOneWidget);
     expect(find.text('Admin'), findsNothing);
   });
 
-  testWidgets('Partner screens render without overflow on a mobile screen', (
+  testWithApi('Partner screens render without overflow on a mobile screen', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(390, 844);
