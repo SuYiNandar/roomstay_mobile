@@ -64,10 +64,13 @@ class HomeScreen extends StatelessWidget {
   ];
 
   static const _steps = [
-    _HowItWorksStep(title: 'Search', icon: Icons.search),
-    _HowItWorksStep(title: 'View', icon: Icons.visibility_outlined),
-    _HowItWorksStep(title: 'Save', icon: Icons.favorite_border),
-    _HowItWorksStep(title: 'Request', icon: Icons.event_available_outlined),
+    _HowItWorksStep(title: 'Find a Room', icon: Icons.search),
+    _HowItWorksStep(title: 'View Details', icon: Icons.visibility_outlined),
+    _HowItWorksStep(title: 'Save Favorite', icon: Icons.favorite_border),
+    _HowItWorksStep(
+      title: 'Request a Viewing',
+      icon: Icons.event_available_outlined,
+    ),
   ];
 
   void _openCategory(String filter) {
@@ -379,7 +382,7 @@ class HomeScreen extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
-                for (var index = 0; index < _steps.length; index++)
+                for (final step in _steps)
                   SizedBox(
                     width: itemWidth,
                     child: Container(
@@ -400,34 +403,20 @@ class HomeScreen extends StatelessWidget {
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
-                              _steps[index].icon,
+                              step.icon,
                               size: 18,
                               color: AppColors.primary,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '0${index + 1}',
-                                  style: AppTextStyles.small.copyWith(
-                                    color: AppColors.tagline,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 1,
-                                  ),
-                                ),
-                                Text(
-                                  _steps[index].title,
-                                  style: AppTextStyles.body.copyWith(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.brandText,
-                                  ),
-                                ),
-                              ],
+                            child: Text(
+                              step.title,
+                              style: AppTextStyles.body.copyWith(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.brandText,
+                              ),
                             ),
                           ),
                         ],

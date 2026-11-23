@@ -143,7 +143,10 @@ void main() {
 
     await tester.enterText(find.byType(TextField).first, 'Sunlit');
     await tester.pump();
-    await tester.tap(find.text('Sunlit Apartment near Ari BTS'));
+    final result = find.text('Sunlit Apartment near Ari BTS');
+    await tester.ensureVisible(result);
+    await tester.pumpAndSettle();
+    await tester.tap(result);
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(ElevatedButton, 'Request Viewing'));

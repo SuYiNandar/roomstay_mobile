@@ -165,7 +165,10 @@ void main() {
   ) async {
     await pumpSearchScreen(tester);
 
-    await tester.tap(find.text('Cozy Studio near RSU'));
+    final result = find.text('Cozy Studio near RSU');
+    await tester.ensureVisible(result);
+    await tester.pumpAndSettle();
+    await tester.tap(result);
 
     await tester.pumpAndSettle();
 

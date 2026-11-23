@@ -370,14 +370,6 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Keep the Home shortcut visible even on a narrow horizontal chip row.
-    final quickFilterOptions = [
-      if (_quickFilterOptions.contains(widget.initialQuickFilter))
-        widget.initialQuickFilter!,
-      ..._quickFilterOptions.where(
-        (filter) => filter != widget.initialQuickFilter,
-      ),
-    ];
     return Scaffold(
       appBar: AppBar(title: const Text('Search')),
       body: SingleChildScrollView(
@@ -426,48 +418,44 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final filter in quickFilterOptions)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: FilterChip(
-                        label: Text(filter),
-                        selected: _quickFilters.contains(filter),
-                        onSelected: (selected) {
-                          setState(() {
-                            if (selected) {
-                              _quickFilters.add(filter);
-                            } else {
-                              _quickFilters.remove(filter);
-                            }
-                          });
-                        },
-                        showCheckmark: false,
-                        selectedColor: AppColors.primaryTint,
-                        backgroundColor: AppColors.surface,
-                        side: BorderSide(
-                          color: _quickFilters.contains(filter)
-                              ? AppColors.primary
-                              : AppColors.coolBorder,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        labelStyle: TextStyle(
-                          fontFamily: AppTextStyles.fontFamily,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: _quickFilters.contains(filter)
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
-                        ),
-                      ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final filter in _quickFilterOptions)
+                  FilterChip(
+                    label: Text(filter),
+                    selected: _quickFilters.contains(filter),
+                    onSelected: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _quickFilters.add(filter);
+                        } else {
+                          _quickFilters.remove(filter);
+                        }
+                      });
+                    },
+                    showCheckmark: false,
+                    selectedColor: AppColors.primaryTint,
+                    backgroundColor: AppColors.surface,
+                    side: BorderSide(
+                      color: _quickFilters.contains(filter)
+                          ? AppColors.primary
+                          : AppColors.coolBorder,
                     ),
-                ],
-              ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    labelStyle: TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: _quickFilters.contains(filter)
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 14),
             LayoutBuilder(
